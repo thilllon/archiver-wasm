@@ -1,0 +1,8 @@
+/target
+node_modules
+/.upstream
+/pkg
+dist
+*.tgz
+.DS_Store
+/tmp
