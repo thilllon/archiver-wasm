@@ -209,7 +209,11 @@ export async function destroyedWhileReading(impl, ctx) {
     const closed = once(archive, 'close');
     archive.abort();
     await Promise.race([closed, delay(CLOSE_WAIT_MS)]);
-    await immediate();
+    // fs.close runs on the thread pool, so the descriptor can outlive 'close' by a few turns
+    const closing = Date.now();
+    while (descriptorsOn(ctx.args.file) !== 0 && Date.now() - closing < CLOSE_WAIT_MS) {
+      await immediate();
+    }
   }
   const engine = archive._module.engine;
   return {
