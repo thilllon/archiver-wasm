@@ -111,7 +111,10 @@ impl WasmZipStream {
             key: key.to_vec(),
             random: random.to_vec(),
         };
-        let status = self.inner.entry(source, &data, &opts).map_err(to_js_error)?;
+        let status = self
+            .inner
+            .entry(source, &data, &opts)
+            .map_err(to_js_error)?;
         Ok(status as u8)
     }
 
@@ -387,7 +390,11 @@ impl WasmPack {
             devminor_oct: devminor_oct.to_owned(),
         };
         let records = std::mem::take(&mut self.pax);
-        let pax = if force_pax { Some(records.as_slice()) } else { None };
+        let pax = if force_pax {
+            Some(records.as_slice())
+        } else {
+            None
+        };
         self.inner._encode(&header, pax);
     }
 
@@ -615,7 +622,10 @@ mod tests {
     fn crc32_update_slices() {
         assert_eq!(crc32_update(0, b"test"), 3632233996);
         assert_eq!(crc32_update(0, b"this is a text file"), 585446183);
-        assert_eq!(crc32_update(crc32_update(0, b"this is a "), b"text file"), 585446183);
+        assert_eq!(
+            crc32_update(crc32_update(0, b"this is a "), b"text file"),
+            585446183
+        );
         assert_eq!(crc32_update(0, b""), 0);
     }
 
@@ -623,7 +633,10 @@ mod tests {
     fn json_append_slices() {
         let source: Vec<u8> = (0..16384usize).map(|i| (i & 255) as u8).collect();
         assert_eq!(json_append(0, &source), 3893830384);
-        assert_eq!(json_append(json_append(0, &source[..5000]), &source[5000..]), 3893830384);
+        assert_eq!(
+            json_append(json_append(0, &source[..5000]), &source[5000..]),
+            3893830384
+        );
         assert_eq!(json_append(0, b""), 0);
     }
 
@@ -932,7 +945,10 @@ mod tests {
         };
         member.extend_from_slice(&end);
         assert_eq!(&member[..10], &[0x1f, 0x8b, 0x08, 0, 0, 0, 0, 0, 4, 3]);
-        assert_eq!(&member[member.len() - 8..], &[0x27, 0x33, 0xe5, 0x22, 19, 0, 0, 0]);
+        assert_eq!(
+            &member[member.len() - 8..],
+            &[0x27, 0x33, 0xe5, 0x22, 19, 0, 0, 0]
+        );
     }
 
     #[test]
@@ -958,9 +974,12 @@ mod tests {
         let salt = [1u8; 16];
         let composite = WasmAesHmacEtmStream::derive_key(&salt, b"password");
         assert_eq!(composite.len(), 66);
-        let Ok(mut stream) =
-            WasmAesHmacEtmStream::new(&composite[..32], &composite[32..64], &composite[64..], &salt)
-        else {
+        let Ok(mut stream) = WasmAesHmacEtmStream::new(
+            &composite[..32],
+            &composite[32..64],
+            &composite[64..],
+            &salt,
+        ) else {
             panic!("a 32 byte key is accepted");
         };
         let mut out = stream.transform(b"this is a text file");

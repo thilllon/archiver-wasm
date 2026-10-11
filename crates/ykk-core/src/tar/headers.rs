@@ -367,13 +367,13 @@ mod tests {
         assert_eq!(field(&block, 0, 100), b"a.txt");
         assert_eq!(
             &block[100..157],
-            b"000644 \0001750 \0001751 \000000000023 12071312436 012207 \x000"
+            b"000644 \x00001750 \x00001751 \x0000000000023 12071312436 012207 \x000"
         );
         assert_eq!(field(&block, 157, 257), b"");
         assert_eq!(&block[257..265], b"ustar\x0000");
         assert_eq!(field(&block, 265, 297), b"user");
         assert_eq!(field(&block, 297, 329), b"group");
-        assert_eq!(&block[329..345], b"000010 \0000000 \0");
+        assert_eq!(&block[329..345], b"000010 \x00000000 \0");
         assert!(block[345..].iter().all(|&b| b == 0));
 
         let block = encode(&base()).unwrap();

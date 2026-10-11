@@ -453,7 +453,7 @@ export default class Archiver extends Transform {
       );
       return this;
     }
-    source = normalizeInputSource(source) as Buffer | StreamReadable | string | null;
+    source = normalizeInputSource(source) as Buffer | StreamReadable | null;
     if (Buffer.isBuffer(source)) {
       data.sourceType = "buffer";
     } else if (isStream(source)) {

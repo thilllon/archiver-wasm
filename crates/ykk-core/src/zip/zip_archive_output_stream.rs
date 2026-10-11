@@ -462,7 +462,9 @@ impl ZipArchiveOutputStream {
         // signature
         self.write(&get_long_bytes(SIG_CFH as u64));
         // version made by
-        self.write(&get_short_bytes((((ae.get_platform() as u16) << 8) | VERSION_MADEBY) as u64));
+        self.write(&get_short_bytes(
+            (((ae.get_platform() as u16) << 8) | VERSION_MADEBY) as u64,
+        ));
         // version to extract and general bit flag
         self.write(&get_short_bytes(ae.get_version_needed_to_extract() as u64));
         self.write(&ae.get_general_purpose_bit().encode());
@@ -639,9 +641,7 @@ mod tests {
     );
     // EMPTY: no entries.
     // 22 bytes
-    const EMPTY: &str = concat!(
-        "504b0506000000000000000000000000000000000000",
-    );
+    const EMPTY: &str = "504b0506000000000000000000000000000000000000";
 
     fn hex(s: &str) -> Vec<u8> {
         (0..s.len())

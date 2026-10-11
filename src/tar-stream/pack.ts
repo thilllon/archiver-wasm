@@ -8,6 +8,8 @@ import type { YkkWasm } from '../wasm.js'
 const { Readable, Writable, getStreamError } = streamx
 
 type Callback = (err?: Error | null) => void
+// The callback streamx hands to its hooks (_open, _write, _final, _destroy, _read).
+type StreamCallback = (err: Error | null) => void
 
 interface Header {
   name?: string | null
@@ -51,7 +53,7 @@ class Sink extends Writable {
   _isVoid: boolean
   _finished: boolean
   _pack: Pack
-  _openCallback: Callback | null
+  _openCallback: StreamCallback | null
 
   // deps/tar-stream/pack.js:13
   constructor (pack: Pack, header: EncodableHeader, callback: Callback) {
@@ -73,7 +75,7 @@ class Sink extends Writable {
   }
 
   // deps/tar-stream/pack.js:31
-  _open (cb: Callback) {
+  _open (cb: StreamCallback) {
     this._openCallback = cb
     if (this._pack._stream === this) this._continueOpen()
   }
@@ -114,7 +116,7 @@ class Sink extends Writable {
   }
 
   // deps/tar-stream/pack.js:69
-  _write (data: Buffer, cb: Callback) {
+  _write (data: Buffer, cb: StreamCallback) {
     if (this._isLinkname) {
       this._linkname = this._linkname ? Buffer.concat([this._linkname, data]) : data
       return cb(null)
@@ -124,11 +126,11 @@ class Sink extends Writable {
       if (data.byteLength > 0) {
         return cb(new Error('No body allowed for this entry'))
       }
-      return cb()
+      return cb(null)
     }
 
     this.written += data.byteLength
-    if (this._pack.push(data)) return cb()
+    if (this._pack.push(data)) return cb(null)
     this._pack._drain = cb
   }
 
@@ -148,7 +150,7 @@ class Sink extends Writable {
   }
 
   // deps/tar-stream/pack.js:101
-  _final (cb: Callback) {
+  _final (cb: StreamCallback) {
     if (this.written !== this.header.size) { // corrupting tar
       return cb(new Error('Size mismatch'))
     }
@@ -168,17 +170,17 @@ class Sink extends Writable {
   }
 
   // deps/tar-stream/pack.js:118
-  _destroy (cb: Callback) {
+  _destroy (cb: StreamCallback) {
     this._pack._done(this)
 
     this._continuePack(this._finished ? null : this._getError())
 
-    cb()
+    cb(null)
   }
 }
 
 class Pack extends Readable {
-  _drain: Callback
+  _drain: StreamCallback
   _finalized: boolean
   _finalizing: boolean
   _pending: Sink[]
@@ -197,9 +199,9 @@ class Pack extends Readable {
   }
 
   // PORTING.md 5.4 (lifetime of the encoder; upstream Pack has no _destroy)
-  _destroy (cb: Callback) {
+  _destroy (cb: StreamCallback) {
     this._wasm.free()
-    cb()
+    cb(null)
   }
 
   // deps/tar-stream/pack.js:137
@@ -289,7 +291,7 @@ class Pack extends Readable {
   _doDrain () {
     const drain = this._drain
     this._drain = noop
-    drain()
+    drain(null)
   }
 
   // deps/tar-stream/pack.js:242
@@ -308,9 +310,9 @@ class Pack extends Readable {
   }
 
   // deps/tar-stream/pack.js:256
-  _read (cb: Callback) {
+  _read (cb: StreamCallback) {
     this._doDrain()
-    cb()
+    cb(null)
   }
 }
 

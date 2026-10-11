@@ -233,9 +233,18 @@ impl ZipArchiveEntry {
 
     // deps/compress-commons/lib/archivers/zip/zip-archive-entry.js:335-342
     pub fn set_unix_mode(&mut self, mut mode: i32) {
-        mode |= if self.is_directory() { S_IFDIR } else { S_IFREG };
+        mode |= if self.is_directory() {
+            S_IFDIR
+        } else {
+            S_IFREG
+        };
         let mut extattr: i32 = 0;
-        extattr |= (mode << SHORT_SHIFT) | (if self.is_directory() { S_DOS_D } else { S_DOS_A });
+        extattr |= (mode << SHORT_SHIFT)
+            | (if self.is_directory() {
+                S_DOS_D
+            } else {
+                S_DOS_A
+            });
         self.set_external_attributes(extattr as u32);
         self.mode = Some((mode & MODE_MASK) as u32);
         self.platform = PLATFORM_UNIX;

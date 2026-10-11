@@ -22,7 +22,7 @@ pub(crate) fn _build_aes_extra_field(ae: &ZipArchiveEntry) -> [u8; 11] {
     buffer[4..6].copy_from_slice(&0x1u16.to_le_bytes()); // AE-1, i.e. CRC is present
     buffer[6..8].copy_from_slice(&0x4541u16.to_le_bytes()); // vendor id, hardcoded
     buffer[8] = 0x3; // encryption strength: AES-256
-    // actual compression method
+                     // actual compression method
     buffer[9..11].copy_from_slice(&(ae.get_method() as u16).to_le_bytes());
 
     buffer
@@ -570,7 +570,9 @@ mod tests {
         ae.set_size(size);
         ae.set_compressed_size(csize);
         ae.set_crc(0x12345678);
-        ae.set_extra(vec![0x01, 0x99, 0x07, 0x00, 0x01, 0x00, 0x41, 0x45, 0x03, 0x00, 0x00]);
+        ae.set_extra(vec![
+            0x01, 0x99, 0x07, 0x00, 0x01, 0x00, 0x41, 0x45, 0x03, 0x00, 0x00,
+        ]);
         ae.set_version_needed_to_extract(51);
         ae.get_general_purpose_bit_mut().use_encryption(true);
         ae._offsets.file = file;
@@ -640,17 +642,23 @@ mod tests {
             zip.aes_smart_stream(&mut ae, &opts()).err(),
             Some(ZipError::ExtraTooShort)
         );
-        ae.set_extra(vec![0x01, 0x99, 0x07, 0x00, 0x01, 0x00, 0x41, 0x45, 0x03, 0x08, 0x00]);
+        ae.set_extra(vec![
+            0x01, 0x99, 0x07, 0x00, 0x01, 0x00, 0x41, 0x45, 0x03, 0x08, 0x00,
+        ]);
         assert_eq!(
             zip.aes_smart_stream(&mut ae, &opts()).ok(),
             Some(EntryStatus::OpenDeflated)
         );
-        ae.set_extra(vec![0x01, 0x99, 0x07, 0x00, 0x01, 0x00, 0x41, 0x45, 0x03, 0x00, 0x00]);
+        ae.set_extra(vec![
+            0x01, 0x99, 0x07, 0x00, 0x01, 0x00, 0x41, 0x45, 0x03, 0x00, 0x00,
+        ]);
         assert_eq!(
             zip.aes_smart_stream(&mut ae, &opts()).ok(),
             Some(EntryStatus::OpenStored)
         );
-        ae.set_extra(vec![0x01, 0x99, 0x07, 0x00, 0x01, 0x00, 0x41, 0x45, 0x03, 0x00, 0x80]);
+        ae.set_extra(vec![
+            0x01, 0x99, 0x07, 0x00, 0x01, 0x00, 0x41, 0x45, 0x03, 0x00, 0x80,
+        ]);
         assert_eq!(
             zip.aes_smart_stream(&mut ae, &opts()).ok(),
             Some(EntryStatus::OpenStored)
