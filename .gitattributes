@@ -1,0 +1,3 @@
+tests/upstream/**/fixtures/** -text
+tests/upstream/**/resources/** -text
+crates/ykk-core/tests/golden/*.bin binary
