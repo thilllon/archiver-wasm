@@ -1,7 +1,14 @@
 # PORTING.md 15.5. Build and the whole test matrix on Linux and macOS, on every supported Node major.
 name: ci
 
-on: [push, pull_request]
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
