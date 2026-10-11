@@ -70,6 +70,7 @@ export default class Zip {
    * @return this.engine
    */
   // node-archiver/lib/plugins/zip.js:57-59
+  on(event: string | symbol, listener: (...args: never[]) => void): ZipStream;
   on() {
     return this.engine.on.apply(this.engine, arguments as unknown as Parameters<ZipStream['on']>);
   }
@@ -77,6 +78,7 @@ export default class Zip {
    * @return this.engine
    */
   // node-archiver/lib/plugins/zip.js:63-65
+  pipe<T extends NodeJS.WritableStream>(destination: T, options?: { end?: boolean }): T;
   pipe() {
     return this.engine.pipe.apply(this.engine, arguments as unknown as Parameters<ZipStream['pipe']>);
   }
@@ -84,6 +86,7 @@ export default class Zip {
    * @return this.engine
    */
   // node-archiver/lib/plugins/zip.js:69-71
+  unpipe(destination?: NodeJS.WritableStream): ZipStream;
   unpipe() {
     return this.engine.unpipe.apply(this.engine, arguments as unknown as Parameters<ZipStream['unpipe']>);
   }

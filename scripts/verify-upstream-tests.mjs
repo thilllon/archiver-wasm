@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // PORTING.md 14.5: fails if a vendored test file differs from tests/upstream/SHA256SUMS, from
-// its source under .upstream/ (when that directory is present) or from its row of
-// tests/upstream/LEDGER.tsv, if a file was added to or removed from a vendored tree, and if a
-// shim differs from its text in PORTING.md 14.1.
+// its hash at the pinned upstream commit (below), from its source under .upstream/ (when that
+// directory is present) or from its row of tests/upstream/LEDGER.tsv, if a file was added to
+// or removed from a vendored tree, and if a shim differs from its text in PORTING.md 14.1.
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -16,6 +16,34 @@ const trees = ['node-archiver/test', 'archiver-zip-encrypted/test'];
 const licenses = {
   'LICENSE.node-archiver': 'node-archiver/LICENSE',
   'LICENSE.archiver-zip-encrypted': 'archiver-zip-encrypted/LICENSE',
+};
+// scripts/fetch-upstream.sh (SHA-256 of every vendored file at node-archiver
+// 52d1d349dfa2bf17956ecab56f477736688a9c5e and archiver-zip-encrypted
+// 0be6b0e6cbc2c4fbd15342a4b1389862679d7668; .upstream/ is absent in CI, and SHA256SUMS is
+// written by the same commit that could edit a vendored test)
+const pinned = {
+  'LICENSE.archiver-zip-encrypted': 'adb1eb7da86ec03af695b93cc0486cc4239d8863dead4ee7dd855727c2f0aded',
+  'LICENSE.node-archiver': '9e23899170d96e708b24a2afce11e96d169c8cebf1bd24ac60b675a400cb1cf1',
+  'archiver-zip-encrypted/test/aes-hmac-etm-stream.js': '478460075385e0e826d8b5b33264b4b016642956242034ef7f9bb1542ae612a3',
+  'archiver-zip-encrypted/test/as-stream.js': '7324745a11f94682c5e8483e085663b0ed4577528dfecfc9f1e48a468fd2db47',
+  'archiver-zip-encrypted/test/crypto-stream.js': 'c21eb8dc644ffebbbb4e046a052668ff133158e797605b44c7e4c765023cf1da',
+  'archiver-zip-encrypted/test/resources/dir/sub/test.txt': 'a665a45920422f9d417e4867efdc4fb8a04a1f3fff1fa07e998e86f7f7a27ae3',
+  'archiver-zip-encrypted/test/resources/empty-file.txt': 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
+  'archiver-zip-encrypted/test/resources/test.txt': '813466902ecdae6b43b158879d91968bff0c877661c1d48345ba855f7336a60b',
+  'archiver-zip-encrypted/test/zip-aes.js': '94ba0e66c6eebd77ee04c161a21dc60f11ca1a95c242fb8022681ab9e42d069a',
+  'archiver-zip-encrypted/test/zip-encrypted.js': '2d0ca041bfa6ab616c92bd723f7bfa105f5f1ab7803181ce2d79cb96cb698be2',
+  'archiver-zip-encrypted/test/zip20.js': '27dba6276aa8fd6ceb1c034145ec4e6133bb049c0111b2eacc00f185ff8804f1',
+  'node-archiver/test/archiver.js': '13541e9cba4cf9ee90fd8511b3949ec01884df544e9a6747736f4f7d919ab871',
+  'node-archiver/test/fixtures/directory/.dotfile': '6b2cf8741093450229512f00f1b33477e570fc504a46304287197d999bf879d0',
+  'node-archiver/test/fixtures/directory/ignore.txt': 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
+  'node-archiver/test/fixtures/directory/level0.txt': '1ef128f5e74f227d60fd632d3574fe72618dbebfeb35266d84ffe58f0ea4f171',
+  'node-archiver/test/fixtures/directory/subdir/level1.txt': '5bce0fe268fa6b4b801fb1082f185b90000ab1258202c653f64b4f037d172336',
+  'node-archiver/test/fixtures/directory/subdir/subsub/level2.txt': '9ea9b8889de45fa608597cb52b79749e2e32c97ef6481cfe6b315655933331f8',
+  'node-archiver/test/fixtures/empty.txt': 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
+  'node-archiver/test/fixtures/executable.sh': '3667bb6922c0f881f5357826a9130fcce94a7144915ea65dfa472e65ae3b2049',
+  'node-archiver/test/fixtures/test.txt': 'dadc624d4454e10293dbd1b701b9ee9f99ef83b4cd07b695111d37eb95abcff8',
+  'node-archiver/test/helpers/index.js': 'c9ad8d89a25f140931291c50e1bb93c8e01e03eb5060308ecbfbaef1fd766a44',
+  'node-archiver/test/plugins.js': '065579681d9586e1dabf2fbb465c725c65888c70c12b1d51b443e33dfdc8c18d',
 };
 // PORTING.md 14.1 (the hand-written shims; 14.6: none is smarter than a re-export)
 const shims = {
@@ -118,6 +146,11 @@ for (const [file, expected] of sums) {
     problems.push('SHA256SUMS: ' + file + ' is not a vendored path');
     continue;
   }
+  if (!Object.hasOwn(pinned, file)) {
+    problems.push('SHA256SUMS: ' + file + ' is not a file of the pinned upstream commits');
+  } else if (pinned[file] !== expected) {
+    problems.push('SHA256SUMS: ' + file + ' differs from its hash at the pinned upstream commit');
+  }
   if (!isFile(path.join(vendored, file))) {
     problems.push('tests/upstream/' + file + ' is missing or is not a regular file');
     continue;
@@ -135,7 +168,7 @@ for (const [file, expected] of sums) {
   }
 }
 
-for (const file of Object.keys(licenses)) {
+for (const file of Object.keys(pinned)) {
   if (!sums.has(file)) {
     problems.push('SHA256SUMS: ' + file + ' is not listed');
   }
@@ -222,6 +255,6 @@ if (problems.length > 0) {
   process.exit(1);
 }
 console.log(
-  'verify-upstream-tests: ' + sums.size + ' vendored files match SHA256SUMS' +
+  'verify-upstream-tests: ' + sums.size + ' vendored files match SHA256SUMS and the pinned upstream hashes' +
     (hasUpstream ? ' and .upstream/' : ' (.upstream/ is absent, not compared)'),
 );

@@ -9,6 +9,7 @@ use super::constants::{
     VERSION_MADEBY, ZIP64_EXTRA_ID, ZIP64_MAGIC, ZIP64_MAGIC_SHORT,
 };
 use super::encrypted::aes_hmac_etm_stream::AesHmacEtmStream;
+use super::encrypted::crypto_stream::CryptoStream;
 use super::util::{get_eight_bytes, get_long_bytes, get_short_bytes, DateFields};
 use super::zip_archive_entry::{Offsets, ZipArchiveEntry};
 
@@ -108,6 +109,7 @@ pub(crate) struct SmartStream {
     pub process: Process,
     pub encryption_stream: Option<AesHmacEtmStream>,
     pub buffered_data: Vec<u8>,
+    pub encrypt: Option<CryptoStream>,
     pub key: Vec<u8>,
     pub random: Vec<u8>,
 }
@@ -309,6 +311,7 @@ impl ZipArchiveOutputStream {
             process,
             encryption_stream: None,
             buffered_data: Vec::new(),
+            encrypt: None,
             key: Vec::new(),
             random: Vec::new(),
         });

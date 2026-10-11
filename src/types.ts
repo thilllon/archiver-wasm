@@ -1,6 +1,8 @@
 import type { Dirent, Stats } from 'node:fs';
 import type { Readable, TransformOptions } from 'node:stream';
 import type { ZlibOptions } from 'node:zlib';
+import type { ArchiverError } from './error.js';
+import type { Options as ReaddirGlobOptions } from './readdir-glob.js';
 
 export interface DateFields {
   year: number; month: number; date: number; hours: number; minutes: number; seconds: number;
@@ -17,6 +19,7 @@ export interface EntryData {
   sourceType?: 'buffer' | 'stream';
   linkname?: string;
   callback?: () => void;                  // per-entry completion hook (core.js:358-363)
+  store?: boolean; comment?: string; namePrependSlash?: boolean;   // zip entries (deps/zip-stream/index.js:128-135)
   [key: string]: unknown;                 // arbitrary caller keys pass through untouched
 }
 export type EntryDataFunction = (data: EntryData) => EntryData | false;
@@ -24,6 +27,24 @@ export type EntryDataFunction = (data: EntryData) => EntryData | false;
 export interface ProgressData {
   entries: { total: number; processed: number };
   fs: { totalBytes: number; processedBytes: number };
+}
+
+/** Options of `Archiver.prototype.glob`: those of readdir-glob, and the `cwd` core.js:694 reads. */
+export type GlobOptions = ReaddirGlobOptions & { cwd?: string };
+
+/** Listeners of the events an `Archiver` emits (core.js) and of the stream events it is used with. */
+export interface ArchiverEvents {
+  entry: (entry: EntryData) => void;
+  progress: (progress: ProgressData) => void;
+  warning: (err: ArchiverError) => void;
+  error: (err: ArchiverError) => void;
+  data: (chunk: Buffer) => void;
+  end: () => void;
+  close: () => void;
+  finish: () => void;
+  drain: () => void;
+  pipe: (src: Readable) => void;
+  unpipe: (src: Readable) => void;
 }
 
 export type ModuleCallback = (err?: Error | null, entry?: unknown) => void;

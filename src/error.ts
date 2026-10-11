@@ -28,7 +28,7 @@ const ERROR_CODES: Record<string, string> = {
 export interface ArchiverError extends Error { code: string; data?: unknown }
 
 // node-archiver/lib/error.js:28-35
-export const ArchiverError = function ArchiverError(this: ArchiverError, code: string, data?: unknown) {
+export const ArchiverError = function (this: ArchiverError, code: string, data?: unknown) {
   Error.captureStackTrace(this, this.constructor);
   //this.name = this.constructor.name;
   this.message = ERROR_CODES[code] || code;

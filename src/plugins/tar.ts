@@ -105,6 +105,7 @@ export default class Tar {
    * @return this.engine
    */
   // node-archiver/lib/plugins/tar.js:87
+  on(event: string | symbol, listener: (...args: never[]) => void): Pack;
   on() {
     return this.engine.on.apply(this.engine, arguments as unknown as Parameters<Pack["on"]>);
   }
@@ -131,6 +132,7 @@ export default class Tar {
    * @return this.engine
    */
   // node-archiver/lib/plugins/tar.js:111
+  unpipe(destination?: NodeJS.WritableStream): unknown;
   unpipe() {
     if (this.compressor) {
       return this.compressor.unpipe.apply(this.compressor, arguments as unknown as Parameters<Gzip["unpipe"]>);

@@ -310,6 +310,21 @@ fn assert_same_structure(name: &str, got: &[u8], expected: &[u8]) {
     assert_eq!(got.end, expected.end, "{name}: end records");
 }
 
+// PORTING.md 7.5 (SmartStream._flush: ZipCrypto hands its compressed bytes out and takes them back after the local header)
+fn end_data(zip: &mut ZipStream, encryption: Encryption, result: &mut Vec<u8>) {
+    if encryption != Encryption::ZipCrypto {
+        zip.inner.end_data().unwrap();
+        return;
+    }
+    let buffered_data = zip.inner.take_output();
+    zip.inner.end_data().unwrap();
+    result.extend_from_slice(&zip.inner.take_output());
+    if !buffered_data.is_empty() {
+        zip.inner.encrypt_data(&buffered_data).unwrap();
+    }
+    zip.inner.encrypt_end().unwrap();
+}
+
 // PORTING.md 14.3 (a zip scenario is replayed through ZipStream)
 fn replay_zip(scenario: &ZipScenario) -> Vec<u8> {
     let encryption = match scenario.encryption {
@@ -353,18 +368,20 @@ fn replay_zip(scenario: &ZipScenario) -> Vec<u8> {
                     result.extend_from_slice(payload);
                     zip.inner.complete_stored().unwrap();
                 } else {
+                    result.extend_from_slice(&zip.inner.take_output());
                     if !payload.is_empty() {
                         zip.inner.write_data(payload).unwrap();
                     }
-                    zip.inner.end_data().unwrap();
+                    end_data(&mut zip, encryption, &mut result);
                 }
             }
             Payload::Stream(chunks) => {
                 zip.entry(Source::Stream, &data, &opts).unwrap();
+                result.extend_from_slice(&zip.inner.take_output());
                 for chunk in chunks {
                     zip.inner.write_data(chunk).unwrap();
                 }
-                zip.inner.end_data().unwrap();
+                end_data(&mut zip, encryption, &mut result);
             }
         }
     }

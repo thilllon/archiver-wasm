@@ -138,6 +138,20 @@ impl WasmZipStream {
         self.inner.inner.end_data().map_err(to_js_error)
     }
 
+    /// ZipCrypto only: one slice of the compressed bytes that writeData() handed out,
+    /// after endData() wrote the local header (V16).
+    // archiver-zip-encrypted/lib/zip20/zip-crypto-stream.js:70-72
+    #[wasm_bindgen(js_name = encryptData)]
+    pub fn encrypt_data(&mut self, chunk: &[u8]) -> Result<(), JsError> {
+        self.inner.inner.encrypt_data(chunk).map_err(to_js_error)
+    }
+
+    // archiver-zip-encrypted/lib/zip20/zip-crypto-stream.js:73-78
+    #[wasm_bindgen(js_name = encryptEnd)]
+    pub fn encrypt_end(&mut self) -> Result<(), JsError> {
+        self.inner.inner.encrypt_end().map_err(to_js_error)
+    }
+
     // deps/compress-commons/lib/archivers/archive-output-stream.js:80-86
     pub fn finish(&mut self) {
         self.inner.inner.finish();
@@ -827,7 +841,17 @@ mod tests {
             panic!("encryption 1 is valid");
         };
         assert_eq!(entry(&mut zip, true, true, b"123", &[7u8; 12], true), 1);
-        let info = payload(&mut zip);
+        assert!(zip.write_data(SOURCE).is_ok());
+        assert_eq!(zip.take_output(), SOURCE);
+        assert_eq!(zip.get_bytes_written(), 0.0);
+        assert!(zip.end_data().is_ok());
+        assert_eq!(zip.take_output().len(), 35);
+        assert!(zip.encrypt_data(SOURCE).is_ok());
+        assert!(zip.encrypt_end().is_ok());
+        assert_eq!(zip.take_output().len(), 19 + 12);
+        let Some(info) = zip.last_entry() else {
+            panic!("the entry was completed");
+        };
         assert_eq!(info.size(), 19.0);
         assert_eq!(info.csize(), 19.0 + 12.0);
         assert_eq!(info.crc(), 585446183);

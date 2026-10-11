@@ -38,6 +38,7 @@ impl ZipArchiveOutputStream {
             process: compression_stream,
             encryption_stream: None,
             buffered_data: Vec::new(),
+            encrypt: None,
             key: opts.key.clone(),
             random: opts.random.clone(),
         });
@@ -49,9 +50,12 @@ impl ZipArchiveOutputStream {
         })
     }
 
-    // archiver-zip-encrypted/lib/zip20/zip-crypto-stream.js:52-54
+    // archiver-zip-encrypted/lib/zip20/zip-crypto-stream.js:52-54 (bufferedData is kept by TypeScript, PORTING.md V16)
     pub(crate) fn zip20_smart_stream_write(&mut self, chunk: &[u8]) -> Result<(), ZipError> {
         let smart = self._smart.as_mut().ok_or(ZipError::NoEntryOpen)?;
+        if smart.encrypt.is_some() {
+            return Err(ZipError::NoEntryOpen);
+        }
         let mut data = Vec::new();
         match &mut smart.process {
             Process::Crc32(compression_stream) => compression_stream._transform(chunk, &mut data),
@@ -59,27 +63,21 @@ impl ZipArchiveOutputStream {
                 compression_stream._transform(chunk, &mut data)?
             }
         }
-        smart
-            .buffered_data
-            .try_reserve(data.len())
-            .map_err(|_| ZipError::EntryTooLarge)?; // PORTING.md V16
-        smart.buffered_data.extend_from_slice(&data);
+        self.out.extend_from_slice(&data);
         Ok(())
     }
 
-    // archiver-zip-encrypted/lib/zip20/zip-crypto-stream.js:56-78
+    // archiver-zip-encrypted/lib/zip20/zip-crypto-stream.js:56-68
     pub(crate) fn zip20_smart_stream_end(&mut self) -> Result<(), ZipError> {
+        if self._smart.as_ref().is_some_and(|s| s.encrypt.is_some()) {
+            return Err(ZipError::NoEntryOpen);
+        }
         let mut smart = self._smart.take().ok_or(ZipError::NoEntryOpen)?;
         let mut ae = self._entry.take().ok_or(ZipError::NoEntryOpen)?;
-        let mut data = Vec::new();
+        // the last 'data' of the compression stream stays here until encrypt_end
         if let Process::Deflate(compression_stream) = &mut smart.process {
-            compression_stream._flush(&mut data)?;
+            compression_stream._flush(&mut smart.buffered_data)?;
         }
-        smart
-            .buffered_data
-            .try_reserve(data.len())
-            .map_err(|_| ZipError::EntryTooLarge)?; // PORTING.md V16
-        smart.buffered_data.extend_from_slice(&data);
 
         let crc = match &smart.process {
             Process::Crc32(compression_stream) => compression_stream.digest(),
@@ -103,23 +101,44 @@ impl ZipArchiveOutputStream {
         self._write_local_file_header(&mut ae);
 
         // write all buffered data to encrypt stream
-        if !smart.buffered_data.is_empty() {
-            self.out
-                .try_reserve(smart.buffered_data.len() + 12)
-                .map_err(|_| ZipError::EntryTooLarge)?; // PORTING.md V16
-            let header = <[u8; 12]>::try_from(smart.random.as_slice()).map_err(|_| {
-                ZipError::InvalidRandomLength {
-                    expected: HEADER_LENGTH,
-                    actual: smart.random.len(),
-                }
-            })?;
-            let mut encrypt =
-                CryptoStream::new(&smart.key, u16::from_be_bytes([crc[0], crc[1]]), header);
-            for chunk in smart.buffered_data.chunks(65536) {
-                let mut encrypted = Vec::new();
-                encrypt._transform(chunk, &mut encrypted);
-                self.write(&encrypted);
+        let header = <[u8; 12]>::try_from(smart.random.as_slice()).map_err(|_| {
+            ZipError::InvalidRandomLength {
+                expected: HEADER_LENGTH,
+                actual: smart.random.len(),
             }
+        })?;
+        smart.encrypt = Some(CryptoStream::new(
+            &smart.key,
+            u16::from_be_bytes([crc[0], crc[1]]),
+            header,
+        ));
+        self._smart = Some(smart);
+        self._entry = Some(ae);
+        Ok(())
+    }
+
+    // archiver-zip-encrypted/lib/zip20/zip-crypto-stream.js:70-72 (one chunk of bufferedData)
+    pub fn encrypt_data(&mut self, chunk: &[u8]) -> Result<(), ZipError> {
+        let smart = self._smart.as_mut().ok_or(ZipError::NoEntryOpen)?;
+        let encrypt = smart.encrypt.as_mut().ok_or(ZipError::NoEntryOpen)?;
+        let mut encrypted = Vec::new();
+        encrypt._transform(chunk, &mut encrypted);
+        self.write(&encrypted);
+        Ok(())
+    }
+
+    // archiver-zip-encrypted/lib/zip20/zip-crypto-stream.js:73-78
+    pub fn encrypt_end(&mut self) -> Result<(), ZipError> {
+        let mut smart = self._smart.take().ok_or(ZipError::NoEntryOpen)?;
+        let Some(mut encrypt) = smart.encrypt.take() else {
+            self._smart = Some(smart);
+            return Err(ZipError::NoEntryOpen);
+        };
+        let ae = self._entry.take().ok_or(ZipError::NoEntryOpen)?;
+        if !smart.buffered_data.is_empty() {
+            let mut encrypted = Vec::new();
+            encrypt._transform(&smart.buffered_data, &mut encrypted);
+            self.write(&encrypted);
         }
 
         self._after_append(ae);
@@ -274,10 +293,15 @@ mod tests {
             }
         };
         // nothing reaches the archive before the entry ends (ENCRYPTED-041)
-        assert!(zip.take_output().is_empty());
+        let buffered_data = zip.take_output();
         assert_eq!(zip.get_bytes_written(), 0);
         assert!(zip._archive.processing);
         zip.end_data().unwrap();
+        assert!(zip._archive.processing);
+        for chunk in buffered_data.chunks(7) {
+            zip.encrypt_data(chunk).unwrap();
+        }
+        zip.encrypt_end().unwrap();
         assert!(!zip._archive.processing);
         assert!(zip._entry.is_none());
         assert_eq!(zip._entries.len(), 1);
@@ -409,22 +433,28 @@ mod tests {
         zip.entry(ae, Source::Buffer { len: 0, crc: 0 }, &opts(6), &date())
             .unwrap();
         zip.end_data().unwrap();
+        zip.encrypt_end().unwrap();
         assert_eq!(zip.get_bytes_written(), 32);
 
         let mut ae = ZipArchiveEntry::new(Some("a.txt"));
         ae.set_method(METHOD_STORED as u16);
         zip.entry(ae, Source::Stream, &opts(6), &date()).unwrap();
+        let out = zip.take_output();
         zip.write_data(b"hel").unwrap();
         zip.write_data(b"lo").unwrap();
+        assert_eq!(zip.take_output(), b"hello");
         zip.end_data().unwrap();
+        zip.encrypt_data(b"hello").unwrap();
+        zip.encrypt_end().unwrap();
         assert_eq!(zip.get_bytes_written(), 32 + 35 + 17);
         assert_eq!(zip._entries[0]._offsets.file, 0);
         assert_eq!(zip._entries[1]._offsets.file, 32);
         assert_eq!(zip._entries[1]._offsets.contents, 32 + 35);
 
+        assert_eq!(out.len(), 32);
         let out = zip.take_output();
-        assert_eq!(long(&out, 32), SIG_LFH);
-        assert_eq!(hex(&out[67..]), "40cfd1f3872ef08929a034a53133b1b255");
+        assert_eq!(long(&out, 0), SIG_LFH);
+        assert_eq!(hex(&out[35..]), "40cfd1f3872ef08929a034a53133b1b255");
     }
 
     #[test]
@@ -456,5 +486,25 @@ mod tests {
         let mut zip = ZipArchiveOutputStream::new(false, Encryption::ZipCrypto);
         assert_eq!(zip.write_data(b"x"), Err(ZipError::NoEntryOpen));
         assert_eq!(zip.end_data(), Err(ZipError::NoEntryOpen));
+        assert_eq!(zip.encrypt_data(b"x"), Err(ZipError::NoEntryOpen));
+        assert_eq!(zip.encrypt_end(), Err(ZipError::NoEntryOpen));
+
+        // the encryption stream exists between end_data and encrypt_end only
+        zip.entry(
+            ZipArchiveEntry::new(Some("a.txt")),
+            Source::Stream,
+            &opts(6),
+            &date(),
+        )
+        .unwrap();
+        assert_eq!(zip.encrypt_data(b"x"), Err(ZipError::NoEntryOpen));
+        assert_eq!(zip.encrypt_end(), Err(ZipError::NoEntryOpen));
+        zip.end_data().unwrap();
+        assert_eq!(zip.write_data(b"x"), Err(ZipError::NoEntryOpen));
+        assert_eq!(zip.end_data(), Err(ZipError::NoEntryOpen));
+        assert!(zip._archive.processing);
+        zip.encrypt_end().unwrap();
+        assert_eq!(zip.encrypt_end(), Err(ZipError::NoEntryOpen));
+        assert_eq!(zip._entries.len(), 1);
     }
 }

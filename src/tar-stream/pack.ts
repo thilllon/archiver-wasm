@@ -267,7 +267,7 @@ class Pack extends Readable {
     if (this._pending.length) (this._pending.shift() as Sink)._continueOpen()
   }
 
-  // deps/tar-stream/pack.js:194-234 (_encode and _encodePax run in Rust; toString(8) and the pax records are deps/tar-stream/headers.js:242-243, 257, 24-26)
+  // deps/tar-stream/pack.js:194-234 (_encode and _encodePax run in Rust; toString(8) and the pax records are deps/tar-stream/headers.js:242-243, 257, 24-26; the octal digits and, with pax, the linkname are only concatenated, headers.js:244, 21)
   _encode (header: EncodableHeader) {
     const pax = header.pax
     if (pax) {
@@ -275,14 +275,14 @@ class Pack extends Readable {
     }
     this._wasm.encode(
       wasmString(header.name), header.typeflag === 5, header.mode,
-      wasmString(header.uid.toString(8)), wasmString(header.gid.toString(8)),
+      '' + header.uid.toString(8), '' + header.gid.toString(8),
       header.size, wasmString(header.size.toString(8)),
       header.mtime.getTime(),
       typeof header.type === 'string' ? header.type : '',
-      header.linkname ? wasmString(header.linkname) : undefined,
+      header.linkname ? (pax ? '' + header.linkname : wasmString(header.linkname)) : undefined,
       header.uname ? wasmString(header.uname) : undefined,
       header.gname ? wasmString(header.gname) : undefined,
-      wasmString((header.devmajor || 0).toString(8)), wasmString((header.devminor || 0).toString(8)),
+      '' + (header.devmajor || 0).toString(8), '' + (header.devminor || 0).toString(8),
       !!pax)
     this.push(toBuffer(this._wasm.takeOutput()))
   }

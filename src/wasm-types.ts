@@ -32,6 +32,8 @@ export interface WasmZipStream {
   completeStored(): void;
   writeData(chunk: Uint8Array): void;
   endData(): void;
+  encryptData(chunk: Uint8Array): void;
+  encryptEnd(): void;
   finish(): void;
   takeOutput(): Uint8Array;
   getBytesWritten(): number;

@@ -1,12 +1,13 @@
 import { Transform } from 'node:stream';
 import type { TransformCallback } from 'node:stream';
-import { wasm, MAX_CHUNK, toBuffer } from './wasm.js';
+import { wasm, EMPTY, MAX_CHUNK, toBuffer } from './wasm.js';
 import type { YkkWasm } from './wasm.js';
 import { validateZlibOptions, resolveLevel, resolveStrategy, GZIP_OS } from './zlib-options.js';
 
 // node-archiver/lib/plugins/tar.js:28 (the stream zlib.createGzip returns, PORTING.md 7.7)
 export class Gzip extends Transform {
   _wasm: InstanceType<YkkWasm['WasmGzip']>;
+  _finished = false;
 
   // node-archiver/lib/plugins/tar.js:28 (the zlib.Gzip constructor, PORTING.md 7.7)
   constructor(level: number, strategy: number) {
@@ -16,18 +17,39 @@ export class Gzip extends Transform {
 
   // node-archiver/lib/plugins/tar.js:28 (the write side of the zlib stream, PORTING.md 5.4, TS-35)
   _transform(chunk: Buffer, encoding: BufferEncoding, callback: TransformCallback): void {
+    const out: Buffer[] = [];
     for (let i = 0; i < chunk.length; i += MAX_CHUNK) {
-      const out = this._wasm.write(chunk.subarray(i, i + MAX_CHUNK));
-      if (out.length > 0) this.push(toBuffer(out));
+      out.push(toBuffer(this._wasm.write(chunk.subarray(i, i + MAX_CHUNK))));
     }
-    callback();
+    // node lib/zlib.js ZlibBase.prototype._transform (the last chunk of an ended stream carries the finish flush)
+    if (this.writableEnded && this.writableLength === chunk.length) out.push(this._finish());
+    this._processCallback(out, callback);
   }
 
   // node-archiver/lib/plugins/tar.js:28 (the end of the gzip member, PORTING.md TS-35)
   _flush(callback: TransformCallback): void {
-    const out = this._wasm.finish();
-    if (out.length > 0) this.push(toBuffer(out));
-    callback();
+    this._processCallback([this._finish()], callback);
+  }
+
+  // node lib/zlib.js ZlibBase.prototype._flush (an empty chunk with the finish flush; the member ends once)
+  _finish(): Buffer {
+    if (this._finished) return EMPTY;
+    this._finished = true;
+    return toBuffer(this._wasm.finish());
+  }
+
+  // node lib/zlib.js processCallback (zlib completes each write on a later turn of the event loop, PORTING.md V3)
+  _processCallback(out: Buffer[], callback: TransformCallback): void {
+    setImmediate(() => {
+      if (this.destroyed) {
+        callback();
+        return;
+      }
+      for (const buf of out) {
+        if (buf.length > 0) this.push(buf);
+      }
+      callback();
+    });
   }
 
   // node-archiver/lib/plugins/tar.js:28 (the handle zlib closes on destroy, PORTING.md 5.4)

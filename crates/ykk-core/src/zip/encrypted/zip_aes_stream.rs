@@ -174,6 +174,7 @@ impl ZipArchiveOutputStream {
             process: compression_stream,
             encryption_stream: Some(encryption_stream),
             buffered_data: Vec::new(),
+            encrypt: None,
             key: Vec::new(),
             random: Vec::new(),
         });

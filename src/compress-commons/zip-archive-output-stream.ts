@@ -11,6 +11,9 @@ import type { ArchiverOptions, ModuleCallback } from "../types.js";
 // deps/compress-commons/lib/archivers/zip/constants.js:28
 const ZLIB_BEST_SPEED = 1;
 
+// PORTING.md V16 (a name and a comment enter wasm whole)
+const MAX_TEXT = 64 * 1024 * 1024;
+
 /** The options object after `_defaults` (zip-archive-output-stream.js:28-41). */
 export type ZipArchiveOutputStreamOptions = ArchiverOptions & {
   zlib: ZlibOptions;
@@ -57,6 +60,10 @@ export default class ZipArchiveOutputStream extends ArchiveOutputStream {
       forceLocalTime: _options.forceLocalTime,
     };
     this._engine = new wasm.WasmZipStream(_options.forceZip64, this._encryptionMethod());
+    // PORTING.md 5.4 (a `signal` that was aborted already ran _destroy inside super())
+    if (this.destroyed) {
+      this._engine.free();
+    }
   }
 
   // PORTING.md 7.5 (hook of the encrypted subclasses: ZipCryptoStream 1, ZipAesStream 2)
@@ -74,9 +81,11 @@ export default class ZipArchiveOutputStream extends ArchiveOutputStream {
     return EMPTY;
   }
 
-  // PORTING.md 5.4 (the only free() of the encoder)
+  // PORTING.md 5.4 (lifetime)
   _destroy(err: Error | null, callback: (error?: Error | null) => void): void {
-    this._engine.free();
+    if (this._engine) {
+      this._engine.free();
+    }
     callback(err);
   }
 
@@ -90,6 +99,12 @@ export default class ZipArchiveOutputStream extends ArchiveOutputStream {
 
   // deps/compress-commons/lib/archivers/zip/zip-archive-output-stream.js:75-84, 100-102 (Rust ZipStream::entry, PORTING.md 7.5)
   _engineEntry(ae: ZipArchiveEntry, source: Buffer | null): number {
+    if (Buffer.byteLength(wasmString(ae.name)) > MAX_TEXT) {
+      throw new Error("entry name too large");
+    }
+    if (Buffer.byteLength(wasmString(ae.comment)) > MAX_TEXT) {
+      throw new Error("entry comment too large");
+    }
     const d = ae.date;
     let crc = 0;
     if (source !== null) {
@@ -137,7 +152,21 @@ export default class ZipArchiveOutputStream extends ArchiveOutputStream {
 
   // deps/compress-commons/lib/archivers/zip/zip-archive-output-stream.js:74
   _appendBuffer(ae: ZipArchiveEntry, source: Buffer, callback: ModuleCallback): void {
-    const status = this._engineEntry(ae, source);
+    // PORTING.md V17 (this.write on a destroyed stream is dropped: :75, :85-88 still complete, a smart stream never ends)
+    if (this.destroyed) {
+      if ((source.length === 0 || ae.store) && this._encryptionMethod() === 0) {
+        this._afterAppend(ae);
+        callback(null, ae);
+      }
+      return;
+    }
+    let status: number;
+    try {
+      status = this._engineEntry(ae, source);
+    } catch (err) {
+      callback(err as Error); // PORTING.md 13.4
+      return;
+    }
     if (status === 0) {
       this.write(source);
       this._engine.completeStored();
@@ -152,7 +181,17 @@ export default class ZipArchiveOutputStream extends ArchiveOutputStream {
 
   // deps/compress-commons/lib/archivers/zip/zip-archive-output-stream.js:99
   _appendStream(ae: ZipArchiveEntry, source: NodeJS.ReadableStream | NodeJS.WritableStream, callback: ModuleCallback): void {
-    const status = this._engineEntry(ae, null);
+    // PORTING.md V17
+    if (this.destroyed) {
+      return;
+    }
+    let status: number;
+    try {
+      status = this._engineEntry(ae, null);
+    } catch (err) {
+      callback(err as Error); // PORTING.md 13.4
+      return;
+    }
     var smart = this._smartStream(ae, callback, status === 2);
     source.once("error", function (err: Error) {
       smart.emit("error", err);
@@ -163,6 +202,10 @@ export default class ZipArchiveOutputStream extends ArchiveOutputStream {
 
   // deps/compress-commons/lib/archivers/zip/zip-archive-output-stream.js:111
   _finish(): void {
+    // PORTING.md V17
+    if (this.destroyed) {
+      return;
+    }
     this._engine.setComment(wasmString(this.getComment()));
     this._engine.setOffset(this.offset);
     this._engine.finish();
@@ -194,6 +237,10 @@ export default class ZipArchiveOutputStream extends ArchiveOutputStream {
     });
     var error: Error | null = null;
     function handleStuff(this: ZipArchiveOutputStream) {
+      // PORTING.md V17
+      if (this.destroyed) {
+        return;
+      }
       ae._setInfo(this._engine.lastEntry());
       this._afterAppend(ae);
       callback(error, ae);
@@ -226,22 +273,35 @@ export default class ZipArchiveOutputStream extends ArchiveOutputStream {
 class SmartStream extends Transform {
   _zip: ZipArchiveOutputStream;
   _onEngineError: (err: Error) => void;
+  _bufferedData: Buffer[];
 
   // deps/crc32-stream/lib/crc32-stream.js:5-10, deps/crc32-stream/lib/deflate-crc32-stream.js:5-11 (the state lives in Rust)
   constructor(zip: ZipArchiveOutputStream, onEngineError: (err: Error) => void) {
     super();
     this._zip = zip;
     this._onEngineError = onEngineError;
+    // archiver-zip-encrypted/lib/zip20/zip-crypto-stream.js:46
+    this._bufferedData = [];
   }
 
   // deps/crc32-stream/lib/crc32-stream.js:11-17, deps/crc32-stream/lib/deflate-crc32-stream.js:18-24 (one wasm call per slice, PORTING.md 5.4)
   _transform(chunk: Buffer, encoding: BufferEncoding, callback: TransformCallback): void {
+    // PORTING.md V17
+    if (this._zip.destroyed) {
+      callback();
+      return;
+    }
     try {
       for (let i = 0; i < chunk.length; i += MAX_CHUNK) {
         this._zip._engine.writeData(chunk.subarray(i, i + MAX_CHUNK));
         const out = this._zip._engine.takeOutput();
         if (out.length > 0) {
-          this.push(toBuffer(out));
+          if (this._zip._encryptionMethod() === 1) {
+            // archiver-zip-encrypted/lib/zip20/zip-crypto-stream.js:52-54 (PORTING.md V16)
+            this._bufferedData.push(toBuffer(out));
+          } else {
+            this.push(toBuffer(out));
+          }
         }
       }
     } catch (err) {
@@ -253,21 +313,43 @@ class SmartStream extends Transform {
 
   // deps/compress-commons/lib/archivers/zip/zip-archive-output-stream.js:153-157 (the end of the processor; Rust writes the data descriptor of :64-66)
   _flush(callback: TransformCallback): void {
+    // PORTING.md V17
+    if (this._zip.destroyed) {
+      callback();
+      return;
+    }
     try {
       // archiver-zip-encrypted/lib/zip20/zip-crypto-stream.js:65 (ZipCrypto writes its local header now, PORTING.md ZIP-135)
       if (this._zip._encryptionMethod() === 1) {
         this._zip._engine.setOffset(this._zip.offset);
       }
       this._zip._engine.endData();
-      const out = this._zip._engine.takeOutput();
-      if (out.length > 0) {
-        this.push(toBuffer(out));
+      this._take();
+      if (this._zip._encryptionMethod() === 1) {
+        // archiver-zip-encrypted/lib/zip20/zip-crypto-stream.js:70-73
+        for (const chunk of this._bufferedData) {
+          for (let i = 0; i < chunk.length; i += MAX_CHUNK) {
+            this._zip._engine.encryptData(chunk.subarray(i, i + MAX_CHUNK));
+            this._take();
+          }
+        }
+        this._bufferedData = [];
+        this._zip._engine.encryptEnd();
+        this._take();
       }
     } catch (err) {
       this._fail(err);
       return;
     }
     callback();
+  }
+
+  // PORTING.md 5.4 (forwards what the last wasm call produced)
+  _take(): void {
+    const out = this._zip._engine.takeOutput();
+    if (out.length > 0) {
+      this.push(toBuffer(out));
+    }
   }
 
   // PORTING.md 13.4 (an engine failure is delivered through the entry callback, never swallowed)

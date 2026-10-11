@@ -8,3 +8,4 @@ dist
 /tmp
 tests/upstream/**/tmp
 tests/upstream/**/target
+/.claude

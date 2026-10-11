@@ -14,11 +14,12 @@ const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 const manifest = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
 
 const REQUIRED = [
-  'dist/index.mjs', 'dist/index.cjs', 'dist/index.d.ts', 'dist/index.d.cts',
-  'cjs/index.cjs', 'cjs/index.d.cts',
+  'dist/index.cjs', 'dist/index.d.ts', 'dist/index.d.cts',
+  'cjs/index.cjs', 'cjs/index.d.cts', 'esm/index.mjs',
   'pkg/ykk_wasm.cjs', 'pkg/ykk_wasm_bg.wasm', 'pkg/ykk_wasm.d.cts',
+  'THIRD_PARTY_NOTICES.md',
 ];
-const FORBIDDEN = ['src/', 'crates/', 'tests/', '.upstream/'];
+const FORBIDDEN = ['src/', 'crates/', 'tests/', '.upstream/', 'dist/index.mjs'];
 const TIMEOUT = 120000; // a smoke check that has not exited by itself after this many ms fails
 
 const specIndex = process.argv.indexOf('--spec');
@@ -58,6 +59,63 @@ function pack(work) {
   return { install: path.join(work, tarballs[0]), label: tarballs[0] + ' (' + files.length + ' files)' };
 }
 
+// One module instance for both formats (15.4): the ESM entry re-exports the CommonJS one, name for name.
+const ONE_INSTANCE = [
+  "import { createRequire } from 'node:module';",
+  "import * as ns from '%s';",
+  "const cjs = createRequire(import.meta.url)('%s');",
+  "const names = (o) => Object.keys(o).filter((key) => key !== 'default').sort();",
+  "if (ns.default !== cjs) { throw new Error('import and require load two instances'); }",
+  "if (names(ns).join() !== names(cjs).join()) { throw new Error('esm/index.mjs exports ' + names(ns) + ', cjs/index.cjs ' + names(cjs)); }",
+  "for (const key of names(ns)) { if (ns[key] !== cjs[key]) { throw new Error(key + ' differs between import and require'); } }",
+  "const err = new ns.ArchiverError('ABORTED');",
+  "if (ns.ArchiverError.name !== 'ArchiverError' || err.constructor.name !== 'ArchiverError') { throw new Error('ArchiverError is named ' + ns.ArchiverError.name); }",
+  "if (ns.ZipEncrypted.name !== 'ZipEncrypted') { throw new Error('ZipEncrypted is named ' + ns.ZipEncrypted.name); }",
+];
+
+// What a consumer writes, for both module formats: named imports, typed events, glob({ cwd }), the encrypted options.
+const TYPES = [
+  "import type { ArchiverOptions, EntryData, GlobOptions, ProgressData } from '%s';",
+  "registerFormat('zip-encrypted', ZipEncrypted);",
+  "const options: ArchiverOptions = { zlib: { level: 9 }, password: 'secret', encryptionMethod: 'aes256' };",
+  "const encrypted: Archiver = archiver.create('zip-encrypted', options);",
+  "const archive = new ZipArchive({ zlib: { level: 9 } });",
+  "const globOptions: GlobOptions = {",
+  "  cwd: '.', ignore: ['a'], dot: true, nodir: true, mark: true, skip: 'b', follow: true, nocase: true,",
+  "  matchBase: true, noglobstar: true, stat: true, absolute: true,",
+  "};",
+  "const entryData: EntryData = { name: 'a.txt', store: true, custom: 1 };",
+  "const onFinish = () => {};",
+  "archive.glob('*.txt', globOptions).glob('*.md', { cwd: '.' }).append('text', entryData).append(process.stdin, { name: 'b' });",
+  "archive.on('entry', (entry) => { const name: string | null | undefined = entry.name; });",
+  "archive.on('progress', (progress) => { const data: ProgressData = progress; });",
+  "archive.on('warning', (err) => { const code: string = err.code; });",
+  "archive.once('error', (err) => { const error: ArchiverError = err; });",
+  "archive.on('data', (chunk) => { const length: number = chunk.length; });",
+  "archive.on('end', onFinish).on('close', onFinish).on('finish', onFinish).on('drain', onFinish).off('finish', onFinish);",
+  "archive.on('pipe', (source) => { source.unpipe(archive); }).on('custom', (value: number) => {});",
+  "encrypted.finalize().then(onFinish);",
+  "// @ts-expect-error",
+  "archive.on('progress', (progress) => progress.entries.processsed);",
+  "// @ts-expect-error",
+  "archive.on('entry', (entry) => { const mode: string = entry.mode; });",
+  "// @ts-expect-error",
+  "archive.on('warning', (err) => { const code: number = err.code; });",
+  "// @ts-expect-error",
+  "archive.append('text', { name: 'a', store: 'false' });",
+  "// @ts-expect-error",
+  "archive.glob('*', { cwdd: '.' });",
+];
+const NAMED = "{ Archiver, ArchiverError, ZipArchive, ZipEncrypted, registerFormat } from '%s';";
+const TYPES_ESM = ['import archiver, ' + NAMED, ...TYPES];
+const TYPES_CJS = [
+  "import archiver = require('%s');",
+  'import ' + NAMED,
+  ...TYPES,
+  "const a: archiver.Archiver = archiver('zip'); new archiver.ZipArchive();",
+  "const cipher: archiver.CryptoCipher = new archiver.CryptoCipher(Buffer.from('key'));",
+];
+
 function smoke(work, install) {
   // an empty project, with the repository's typescript and @types/node for the two type checks
   const project = path.join(work, 'project');
@@ -74,13 +132,23 @@ function smoke(work, install) {
   const options = { cwd: project, timeout: TIMEOUT };
   run('require smoke', process.execPath, ['-e', "require('" + name + "')('zip')"], options);
   run('import smoke', process.execPath, ['--input-type=module', '-e', "import a, { ZipArchive } from '" + name + "'; new ZipArchive()"], options);
-  fs.writeFileSync(path.join(project, 'smoke.cts'),
-    "import archiver = require('" + name + "'); const a: archiver.Archiver = archiver('zip'); new archiver.ZipArchive();\n");
-  fs.writeFileSync(path.join(project, 'smoke.mts'),
-    "import a, { ZipArchive } from '" + name + "'; new ZipArchive();\n");
+  const source = (lines) => lines.join('\n').replaceAll('%s', name) + '\n';
+  fs.writeFileSync(path.join(project, 'instance.mjs'), source(ONE_INSTANCE));
+  run('one instance smoke', process.execPath, ['instance.mjs'], options);
+
+  // smoke.ts is the CommonJS file of a project that resolves the package through "main" and "types"
+  fs.writeFileSync(path.join(project, 'smoke.cts'), source(TYPES_CJS));
+  fs.writeFileSync(path.join(project, 'smoke.mts'), source(TYPES_ESM));
+  fs.writeFileSync(path.join(project, 'smoke.ts'), source(TYPES_CJS));
   const tsc = path.join(project, 'node_modules', 'typescript', 'bin', 'tsc');
-  for (const file of ['smoke.cts', 'smoke.mts']) {
-    run('tsc ' + file, process.execPath, [tsc, '--module', 'node16', '--moduleResolution', 'node16', '--strict', '--noEmit', file], options);
+  const node16 = ['--module', 'node16', '--moduleResolution', 'node16'];
+  const checks = [
+    ['smoke.cts', node16], ['smoke.mts', node16],
+    ['smoke.mts', ['--module', 'esnext', '--moduleResolution', 'bundler']],
+    ['smoke.ts', ['--module', 'commonjs', '--moduleResolution', 'node10']],
+  ];
+  for (const [file, flags] of checks) {
+    run('tsc ' + flags.join(' ') + ' ' + file, process.execPath, [tsc, ...flags, '--strict', '--noEmit', file], options);
   }
 }
 

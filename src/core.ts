@@ -2,7 +2,6 @@ import { createReadStream, lstat, readlinkSync, Stats } from "node:fs";
 import type { Dirent } from "node:fs";
 import { isStream } from "./is-stream.js";
 import readdirGlob from "./readdir-glob.js";
-import type { Options } from "./readdir-glob.js";
 import { Readable } from "./lazystream.js";
 import { queue } from "./queue.js";
 import type { QueueObject } from "./queue.js";
@@ -21,15 +20,27 @@ import {
   trailingSlashIt,
 } from "./utils.js";
 import type {
+  ArchiverEvents,
   ArchiverModule,
   ArchiverOptions,
   EntryData,
   EntryDataFunction,
+  GlobOptions,
   Match,
   QueueTask,
 } from "./types.js";
 const { ReaddirGlob } = readdirGlob;
 const win32 = process.platform === "win32";
+
+// the typed events of 7.2: declarations only, the methods are Transform's
+export default interface Archiver {
+  on<E extends keyof ArchiverEvents>(event: E, listener: ArchiverEvents[E]): this;
+  on(event: string | symbol, listener: (...args: never[]) => void): this;
+  once<E extends keyof ArchiverEvents>(event: E, listener: ArchiverEvents[E]): this;
+  once(event: string | symbol, listener: (...args: never[]) => void): this;
+  off<E extends keyof ArchiverEvents>(event: E, listener: ArchiverEvents[E]): this;
+  off(event: string | symbol, listener: (...args: never[]) => void): this;
+}
 
 // node-archiver/lib/core.js:22
 export default class Archiver extends Transform {
@@ -436,7 +447,7 @@ export default class Archiver extends Transform {
   }
 
   // node-archiver/lib/core.js:525
-  append(source: Buffer | StreamReadable | string | null, data?: EntryData): this {
+  append(source: Buffer | NodeJS.ReadableStream | string | null, data?: EntryData): this {
     if (this._state.finalize || this._state.aborted) {
       this.emit("error", new ArchiverError("QUEUECLOSED"));
       return this;
@@ -468,7 +479,7 @@ export default class Archiver extends Transform {
     this._entriesCount++;
     this._queue.push({
       data: data,
-      source: source,
+      source: source as Buffer | StreamReadable,
     });
     return this;
   }
@@ -558,7 +569,7 @@ export default class Archiver extends Transform {
   }
 
   // node-archiver/lib/core.js:672
-  glob(pattern: string, options?: Options, data?: EntryData): this {
+  glob(pattern: string, options?: GlobOptions, data?: EntryData): this {
     this._pending++;
     options = {
       stat: true,
@@ -580,7 +591,7 @@ export default class Archiver extends Transform {
       entryData.name = match.relative;
       this._append(match.absolute, entryData);
     }
-    const globber = new ReaddirGlob((options as { cwd?: string }).cwd || ".", options);
+    const globber = new ReaddirGlob(options.cwd || ".", options);
     globber.on("error", onGlobError.bind(this));
     globber.on("match", onGlobMatch.bind(this));
     globber.on("end", onGlobEnd.bind(this));

@@ -55,6 +55,11 @@ export default class ZipStream extends ZipArchiveOutputStream {
 
     options.namePrependSlash = options.namePrependSlash || false;
 
+    // PORTING.md V14 (a comment that :44-46 would set must be a string)
+    if (options.comment && options.comment.length > 0 && typeof options.comment !== "string") {
+      throw new TypeError("expected a string");
+    }
+
     super(options);
 
     if (options.comment && options.comment.length > 0) {
@@ -150,6 +155,11 @@ export default class ZipStream extends ZipArchiveOutputStream {
       entry.setMethod(0);
     }
     if ((data.comment as string).length > 0) {
+      // PORTING.md V14
+      if (typeof data.comment !== "string") {
+        callback(new TypeError("expected a string"));
+        return;
+      }
       entry.setComment(data.comment as string);
     }
     if (data.type === "symlink" && typeof data.mode !== "number") {
