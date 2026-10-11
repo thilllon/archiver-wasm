@@ -53,8 +53,15 @@ jobs:
 
       - run: npm ci
 
-      # prepublishOnly builds, runs the whole test matrix and checks the tarball; prepack builds again.
-      - run: npm publish
+      # Build, run the whole test matrix and check the tarball WITHOUT the npm token in the
+      # environment, so no build script, test or dev dependency can read it.
+      - name: Build, test and check the tarball (no credentials)
+        run: npm run prepublishOnly
+
+      # Lifecycle scripts are disabled for the publish itself: the only process that sees the
+      # token is npm uploading the already built tree.
+      - name: Publish
+        run: npm publish --ignore-scripts
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
