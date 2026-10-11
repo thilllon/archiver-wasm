@@ -1,0 +1,18 @@
+# crates/ykk-wasm/Cargo.toml
+[package]
+name = "ykk-wasm"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+ykk-core = { path = "../ykk-core" }
+wasm-bindgen = "=0.2.100"   # exact pin, confirmed by the toolchain gate (2.2); the glue behavior of 5.6 was observed with it
+
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = false            # opt-level 3 and LTO already ran; wasm-pack would run whichever wasm-opt is on PATH (2.2)
+
+[lints]
+workspace = true

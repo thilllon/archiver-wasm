@@ -1,0 +1,76 @@
+# PORTING.md 15.5. Publishes the version named by a pushed tag v<version> to npm.
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+env:
+  WASM_PACK_VERSION: 0.15.0 # PORTING.md 12.3, fixed by the toolchain gate (2.2)
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: The tag must equal the version of package.json
+        run: test "$GITHUB_REF_NAME" = "v$(node -p "require('./package.json').version")"
+
+      - name: Install 7z (apt)
+        run: sudo apt-get update && sudo apt-get install -y p7zip-full
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          registry-url: https://registry.npmjs.org
+
+      - name: Install the Rust toolchain of rust-toolchain.toml
+        run: |
+          channel=$(sed -n 's/^channel = "\(.*\)"$/\1/p' rust-toolchain.toml)
+          test -n "$channel"
+          rustup toolchain install "$channel" --profile minimal --no-self-update \
+            --target wasm32-unknown-unknown --component rustfmt --component clippy
+          test "$(rustc --version | cut -d' ' -f2)" = "$channel"
+
+      - name: Install wasm-pack
+        run: |
+          case "$(uname -s)-$(uname -m)" in
+            Linux-x86_64) target=x86_64-unknown-linux-musl; sum=c09f971ecaed9a2efc80fdcea7a00ef6b53c7fadc8c57d1f61b53a6aa66b668a ;;
+            *) echo "no pinned wasm-pack archive for $(uname -s)-$(uname -m)"; exit 1 ;;
+          esac
+          name="wasm-pack-v${WASM_PACK_VERSION}-${target}"
+          curl --fail --silent --show-error --location --retry 3 --output "$RUNNER_TEMP/$name.tar.gz" \
+            "https://github.com/wasm-bindgen/wasm-pack/releases/download/v${WASM_PACK_VERSION}/$name.tar.gz"
+          echo "$sum  $RUNNER_TEMP/$name.tar.gz" | shasum -a 256 --check
+          tar -xzf "$RUNNER_TEMP/$name.tar.gz" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/$name" >> "$GITHUB_PATH"
+          test "$("$RUNNER_TEMP/$name/wasm-pack" --version)" = "wasm-pack ${WASM_PACK_VERSION}"
+
+      - run: npm ci
+
+      # prepublishOnly builds, runs the whole test matrix and checks the tarball; prepack builds again.
+      - run: npm publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: The registry must serve the version
+        run: |
+          version=$(node -p "require('./package.json').version")
+          name=$(node -p "require('./package.json').name")
+          for attempt in 1 2 3 4 5 6 7 8 9 10; do
+            if [ "$(npm view "$name@$version" version 2>/dev/null)" = "$version" ]; then exit 0; fi
+            sleep 15
+          done
+          echo "the registry does not serve $name@$version"
+          exit 1
+
+      - name: A fresh install must pass the smoke checks (section 16 item 4)
+        run: |
+          version=$(node -p "require('./package.json').version")
+          name=$(node -p "require('./package.json').name")
+          node scripts/check-tarball.mjs --spec "$name@$version"

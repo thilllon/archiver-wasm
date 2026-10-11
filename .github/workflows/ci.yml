@@ -1,0 +1,76 @@
+# PORTING.md 15.5. Build and the whole test matrix on Linux and macOS, on every supported Node major.
+name: ci
+
+on: [push, pull_request]
+
+permissions:
+  contents: read
+
+env:
+  WASM_PACK_VERSION: 0.15.0 # PORTING.md 12.3, fixed by the toolchain gate (2.2)
+
+jobs:
+  test:
+    name: ${{ matrix.os }}, Node ${{ matrix.node }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        node: [18, 20, 22, 24]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install 7z (apt)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y p7zip-full
+
+      - name: Install 7z (brew)
+        if: runner.os == 'macOS'
+        run: brew install p7zip
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      - name: Install the Rust toolchain of rust-toolchain.toml
+        run: |
+          channel=$(sed -n 's/^channel = "\(.*\)"$/\1/p' rust-toolchain.toml)
+          test -n "$channel"
+          rustup toolchain install "$channel" --profile minimal --no-self-update \
+            --target wasm32-unknown-unknown --component rustfmt --component clippy
+          test "$(rustc --version | cut -d' ' -f2)" = "$channel"
+
+      - name: Cache cargo downloads and the wasm-bindgen CLI that wasm-pack fetches
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cache/.wasm-pack
+            ~/Library/Caches/.wasm-pack
+          key: cargo-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock') }}
+
+      - name: Install wasm-pack
+        run: |
+          case "$(uname -s)-$(uname -m)" in
+            Linux-x86_64) target=x86_64-unknown-linux-musl; sum=c09f971ecaed9a2efc80fdcea7a00ef6b53c7fadc8c57d1f61b53a6aa66b668a ;;
+            Darwin-arm64) target=aarch64-apple-darwin; sum=0abff4a03d670b6c00ea31d0e1608a72407e355f3d3765e9c30eb45cd5b7e318 ;;
+            *) echo "no pinned wasm-pack archive for $(uname -s)-$(uname -m)"; exit 1 ;;
+          esac
+          name="wasm-pack-v${WASM_PACK_VERSION}-${target}"
+          curl --fail --silent --show-error --location --retry 3 --output "$RUNNER_TEMP/$name.tar.gz" \
+            "https://github.com/wasm-bindgen/wasm-pack/releases/download/v${WASM_PACK_VERSION}/$name.tar.gz"
+          echo "$sum  $RUNNER_TEMP/$name.tar.gz" | shasum -a 256 --check
+          tar -xzf "$RUNNER_TEMP/$name.tar.gz" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/$name" >> "$GITHUB_PATH"
+          test "$("$RUNNER_TEMP/$name/wasm-pack" --version)" = "wasm-pack ${WASM_PACK_VERSION}"
+
+      - run: npm ci
+      - run: cargo fmt --check
+      - run: cargo clippy --workspace -- -D warnings
+      - run: npm run build
+      - run: npm run typecheck
+      - run: npm test
+      - run: node scripts/check-tarball.mjs

@@ -193,16 +193,85 @@ after every unit exists (M1).
    call every export, check that the `Err` arm arrives as a thrown `Error`, that a string
    passed where `&[u8]` is expected is coerced as 5.6 describes, and that the process exits
    by itself.
-4. Record the versions that passed and pin them, replacing the provisional values of this
-   guide: the exact Rust version in `rust-toolchain.toml` (provisional `1.99.0`, the
-   toolchain of the authoring machine), the exact `wasm-pack` version in 12.3 (provisional
-   `0.15.0`), the `wasm-bindgen` pin of 12.1 (provisional `=0.2.100`; if that release does
-   not build with the pinned Rust, the gate raises the pin to the newest release that does
-   and records it in 12.1), whether `wasm-opt` runs (provisional: off, 15.2), and the exact
-   versions of `typescript`, `tsup`, `tsx` and `@types/node` in `package.json`.
-   `Cargo.lock` and `package-lock.json` are committed.
+4. Record the versions that passed and pin them: the exact Rust version in
+   `rust-toolchain.toml`, the exact `wasm-pack` version in 12.3, the `wasm-bindgen` pin of
+   12.1 (if that release does not build with the pinned Rust, the gate raises the pin to
+   the newest release that does and records it in 12.1), whether `wasm-opt` runs (15.2),
+   and the exact versions of `typescript`, `tsup`, `tsx` and `@types/node` in
+   `package.json`. `Cargo.lock` and `package-lock.json` are committed.
 5. If no combination loads under Node 18, that is a blocker for goal 1.1 item 5 and is
    raised before the units start, not after.
+
+**Gate record.** The gate ran on 2026-10-12 (macOS, Darwin 25.6.0, aarch64) and passed. The values
+below replace the provisional ones this guide was written with. The gate is run again only
+when one of them changes.
+
+| Pin | Value | Recorded in |
+|---|---|---|
+| Rust | `1.99.0`, target `wasm32-unknown-unknown`, components `rustfmt` and `clippy` | `rust-toolchain.toml`, 12.3 |
+| `wasm-pack` | `0.15.0` | 12.3, both workflow files |
+| `wasm-bindgen` | `=0.2.100` (it builds with Rust 1.99.0, so the pin was not raised) | 12.1 |
+| `wasm-opt` | off | 12.1, 15.2 |
+| `typescript` | `5.9.3` | `package.json`, 12.2 |
+| `tsup` | `8.5.1` | `package.json`, 12.2 |
+| `tsx` | `4.23.15` | `package.json`, 12.2 |
+| `@types/node` | `18.19.130` | `package.json`, 12.2 |
+
+What was executed: the throwaway crate of step 1, and a second throwaway crate that exports
+the whole listing of 5.3 with placeholder bodies and links the seven crates of 12.1. Both
+were built with the script of 15.2 and required under Node 18.0.0, 18.20.8, 20.20.2,
+22.22.0 and 24.21.0: every export was called, the `Err` arm of a constructor and of a
+method arrived as a plain `Error` with the `Display` text as `message`, and the process
+exited by itself with wasm objects left to the `FinalizationRegistry`. On wasm32 the crates
+of 12.1 reproduced the check values of 14.3 for CRC-32, PBKDF2, AES-CTR with a
+little-endian counter and HMAC-SHA1. The whole chain of `npm run build`, `npm pack` and
+`scripts/check-tarball.mjs` (with stand-ins for the unit files of `src/`) passed under Node
+18.20.8, 20.20.2, 22.22.0 and 24.21.0.
+
+What the gate found, and where this guide changed because of it:
+
+- A non-string at a `&str` or `Option<String>` parameter is not coerced by the glue. A
+  number, boolean, plain object, symbol or bigint traps (`WebAssembly.RuntimeError: memory
+  access out of bounds`; on Node 18.0.0 and 18.12.0 on darwin-arm64 the process is killed
+  by SIGBUS). The claim that the glue coerces string parameters was wrong: 5.6 and V14 are
+  corrected, `src/wasm.ts` gained `wasmString` (15.3), and the call sites of 7.5 and 7.8
+  use it.
+- At a `&[u8]` parameter a typed array that is not a `Uint8Array` is copied element by
+  element, and an `ArrayBuffer` or `DataView` arrives as zero bytes (5.6, 7.9).
+- The declarations generated for the listing of 5.3 satisfy `YkkWasm`;
+  `scripts/check-wasm-types.mjs` rejects a changed return type, a missing method and an
+  added required parameter.
+- `typescript` 7.0.2 cannot be used: the package no longer exports the JavaScript compiler
+  API that tsup's `dts` build calls. `typescript` 6.0.3 fails in the same build with
+  `TS5101` (tsup passes `baseUrl`). 5.9.3 builds with the `tsconfig.json` and
+  `tsup.config.ts` of 15.4 unchanged.
+- In the CommonJS bundle tsup's `import.meta.url` shim is `new URL('file:' + __filename)`,
+  which loses everything after a `#` or `?` in the install path and decodes `%XX`:
+  `require('@thilllon/ykk')` then fails with `Cannot find module '../pkg/ykk_wasm.cjs'`.
+  `src/wasm.ts` passes `__filename` to `createRequire` where it exists (15.3).
+- `wasm-pack` also writes `pkg/ykk_wasm_bg.wasm.d.ts`; the build script removes it (15.2).
+- `rustup` with the `minimal` profile installs neither `rustfmt` nor `clippy` for the
+  pinned toolchain; `rust-toolchain.toml` lists both components (12.3).
+- With `wasm-opt` enabled, `wasm-pack` 0.15.0 runs whichever `wasm-opt` it finds on `PATH`
+  (binaryen 133 on the gate machine: the result loads under Node 18 and shrinks the
+  placeholder module from 155 KiB to 131 KiB). The published binary would then depend on
+  an unpinned tool, so it stays off.
+- `npm pack --json` prints the output of the `prepack` script on the same stdout, before
+  the JSON report (15.5).
+- The `overrides` block this guide first pinned (one nested object per oracle package) does
+  not work with npm 10: `zip-stream` 7.0.5 resolves the 6.0.0 versions of its two
+  dependencies, and `npm ci` rejects the lockfile. It was replaced by a flat block keyed by package and major range, with which
+  npm 10.8.2, 10.9.4 and 11.19.0 all install the oracle tree of 14.2 and accept each
+  other's lockfile (15.4).
+- `brace-expansion` 5.0.12, which `minimatch` 10.2.6 depends on, declares
+  `node: 20 || >=22`. On Node 18 `npm install` prints an `EBADENGINE` warning for it; it
+  loads and expands braces under Node 18.0.0 and 18.20.8. `minimatch` itself declares
+  `18 || 20 || >=22`.
+- `cjs/index.d.cts` (15.4) compiles, and both TypeScript smoke files of section 16 item 4
+  compile against the packed tarball.
+- The package loads under Node 18.0.0. The test tooling needs Node 18.18 or newer
+  (`mocha` 11.7.5 declares it, and `mocha -n import=tsx` needs `node --import`), which the
+  Node 18 job of CI satisfies (12.3).
 
 ---
 
@@ -256,7 +325,7 @@ number.
 | V11 | The `Archiver` constructor also accepts the archiver 7 form `(format, options)`: if the first argument is a string it is ignored and the second is the options object. | R19. In archiver 8 a string first argument would be spread into characters, which nobody relies on. |
 | V12 | `Zip`, `Tar` and `Json` plugin instances carry `supports = { directory: true, symlink: true }` as in archiver 7 (archiver-zip-encrypted/node_modules/archiver/lib/plugins/zip.js:33). | Needed by `setModule` (R19). Not serialized, not otherwise read. |
 | V13 | wasm panics are bugs, never behavior. Where upstream would throw a JS `RangeError` or `TypeError` from a Buffer read on a short buffer in a path ykk cannot reach, Rust returns an `Err` with its own message. | Section 5.5. |
-| V14 | Values whose JS type is outside the published TypeScript types (a number as `comment`, an object as `uid`, a Buffer as archive comment) are out of contract unless a `BEHAVIORS.tsv` row covers the case. They must not trap the wasm instance; message parity is not required. For number and string parameters the glue coerces (5.6). For byte parameters (`&[u8]`) the glue does not validate and does not throw: every value that reaches one must be converted to a `Buffer` or rejected in TypeScript before the wasm call (5.6, 7.9). | The wasm-bindgen glue has its own coercion rules. |
+| V14 | Values whose JS type is outside the published TypeScript types (a number as `comment`, an object as `uid`, a Buffer as archive comment) are out of contract unless a `BEHAVIORS.tsv` row covers the case. They must not trap the wasm instance; message parity is not required. For number parameters the JS-to-wasm call coerces (5.6). For string parameters (`&str`, `Option<String>`) the glue does not coerce and most non-strings trap: every argument at one is a string by construction or goes through `wasmString`, which throws a `TypeError` first (5.6, 15.3). For byte parameters (`&[u8]`) the glue does not validate and does not throw: every value that reaches one must be converted to a `Buffer` or rejected in TypeScript before the wasm call (5.6, 7.9). | The wasm-bindgen glue has its own coercion rules. |
 | V15 | On the archiver 7 surface (the vending function and `ZipEncrypted`) ykk runs the archiver 8 core and the zip-stream 7 port, not archiver 7.0.0 / zip-stream 6.0.0 / compress-commons 6.0.0 / archiver-utils 5.0.1. Consequences: (a) options and entry data are copied with object spread, not defaulted in place with lodash `defaults`: the caller's options object does not gain `highWaterMark` / `statConcurrency` (so the encrypting engine keeps Node's default `highWaterMark` instead of 1 MiB), the caller's entry data object is not mutated, and the `'entry'` payload lacks the keys `namePrependSlash`, `linkname`, `store`, `comment` (for `symlink()` also `date`, `mode`, `store`) that zip-stream 6 wrote onto it; (b) a key explicitly set to `undefined` is not defaulted (`mode: undefined` gives platform FAT and external attributes 0 where the archiver 7 stack writes version-made-by `0x032D` and `0x81A40020`); (c) sources are detected with is-stream duck typing, not `instanceof Stream` (a duck-typed `{ readable: true, pipe }` object is accepted where archiver 7 emits `INPUTSTEAMBUFFERREQUIRED`). | R16, R19. One core for both surfaces; evidence: archiver-zip-encrypted/node_modules/archiver-utils/index.js:59-68, archiver/lib/core.js:35, 288, 580, zip-stream/index.js:62. ENCRYPTED-113 to ENCRYPTED-116. |
 | V16 | wasm32 memory limits. (a) No wasm call carries more than `MAX_CHUNK` = 1 MiB of payload; TypeScript slices (5.4). (b) The payload of a stored buffer entry of the plain engine never enters wasm: TypeScript computes its CRC in slices and writes the bytes itself, as upstream's `this.write(source)` (zip-archive-output-stream.js:86). (c) ZipCrypto keeps the whole compressed entry in wasm linear memory until the entry ends (upstream keeps the chunks in the JS heap, zip-crypto-stream.js:46-54) and encrypts it into the output vector in one call, so two copies must fit into the 4 GiB linear memory and each into a 2 GiB vector. An entry that does not fit fails with `Error('zip20 entry too large')` delivered through the entry callback (archiver emits it as `'error'`), where upstream would go on buffering. | A wasm32 slice cannot exceed 2 GiB and linear memory is 4 GiB in total; without the rule a large Buffer would abort the instance. ZIP-137, ENCRYPTED-118. |
 | V17 | The wasm encoder of an engine stream is freed when the stream is destroyed (5.4). A method that needs the encoder (`isZip64()`, or `entry()` on a stream that was destroyed without being finished) called after that throws the glue's `Error` (`null pointer passed to rust`) where upstream would still answer from JS state. | Linear memory is not garbage collected in step with the JS heap; waiting for `FinalizationRegistry` alone lets it grow without bound. |
@@ -431,7 +500,7 @@ content or signature fixed by this guide so that units can be written in paralle
 
 ```
 Cargo.toml                                   workspace: members crates/ykk-core, crates/ykk-wasm (pinned, 15.1)
-rust-toolchain.toml                          channel = the exact version fixed by the toolchain gate (2.2), targets = ["wasm32-unknown-unknown"]
+rust-toolchain.toml                          channel = "1.99.0" (fixed by the toolchain gate, 2.2), targets = ["wasm32-unknown-unknown"], components = ["rustfmt", "clippy"]
 crates/ykk-core/Cargo.toml                   (pinned, 12.1)
 crates/ykk-core/src/lib.rs                   module list (pinned, 6.1)
 crates/ykk-core/src/error.rs                 ZipError, DeflateError (pinned, 6.2)
@@ -482,7 +551,7 @@ src/is-stream.ts                             node-archiver/node_modules/is-strea
 src/normalize-path.ts                        node-archiver/node_modules/normalize-path/index.js
 src/readdir-glob.ts                          deps/readdir-glob/src/index.ts
 src/types.ts                                 shared TypeScript interfaces (pinned, 7.1)
-src/wasm.ts                                  synchronous wasm loader + typed handle, MAX_CHUNK, toBuffer (pinned, 15.3)
+src/wasm.ts                                  synchronous wasm loader + typed handle, MAX_CHUNK, toBuffer, wasmString (pinned, 15.3)
 src/wasm-types.ts                            hand-written TypeScript view of the wasm surface of 5.3 (pinned, 15.3)
 src/callable.ts                              callable() helper (pinned, 7.9)
 src/zlib-options.ts                          validateZlibOptions, resolveLevel (pinned, 7.7)
@@ -844,7 +913,8 @@ only the wasm-bindgen intrinsics), no callbacks into JS, no `js-sys`, no `serde`
 - **Input** (`&[u8]`, `&str`): the wasm-bindgen glue copies the JS bytes into wasm linear
   memory, calls the export, and frees the copy on return. Rust never keeps a pointer to an
   input. A `Buffer` is a `Uint8Array` and is passed as is. Strings are encoded to UTF-8 by
-  the glue; lone surrogates become U+FFFD, the same result as `Buffer.from(str)`.
+  the glue; lone surrogates become U+FFFD, the same result as `Buffer.from(str)`. The glue
+  converts nothing: the argument must already be a JS string, or a `Uint8Array` (5.6).
 - **Bounded payload** (V16): no wasm call receives more than `MAX_CHUNK` = `1024 * 1024`
   bytes of payload (the constant is exported by `src/wasm.ts`). Every TypeScript shell that
   forwards caller data loops `for (let i = 0; i < chunk.length; i += MAX_CHUNK)` over
@@ -919,12 +989,13 @@ only the wasm-bindgen intrinsics), no callbacks into JS, no `js-sys`, no `serde`
 | number used arithmetically (sizes, milliseconds, calendar fields) | `f64` | `ToNumber`. NaN and fractions are passed through and handled in Rust with `numeric::to_int32`. |
 | CRC, DOS time, attributes (out of Rust) | `u32` | the glue applies `>>> 0`; always a non-negative JS number. |
 | sizes and offsets (out of Rust) | `f64` | `u64 as f64`; exact below 2^53. |
-| boolean decided by JS truthiness | `bool` | TypeScript writes `!!x` or the literal upstream comparison. |
-| optional string decided by truthiness (`if (opts.linkname)`) | `Option<String>` | TypeScript passes `x ? x : undefined`. |
-| value formatted by upstream with `toString(8)` | `&str` | TypeScript calls `.toString(8)` and passes the result (10.4). |
+| boolean decided by JS truthiness | `bool` | TypeScript writes `!!x` or the literal upstream comparison. The call itself applies `ToInt32`, not truthiness: a non-numeric string would arrive as `false`. |
+| optional string decided by truthiness (`if (opts.linkname)`) | `Option<String>` | TypeScript passes `x ? wasmString(x) : undefined`. `undefined` and `null` are `None`; `''` is `Some("")`. |
+| value formatted by upstream with `toString(8)` | `&str` | TypeScript calls `.toString(8)` and passes the result through `wasmString` (10.4). |
+| any other value at a `&str` or `Option<String>` parameter | `&str` | Never allowed to happen. The release glue does not coerce and does not validate: it reads `arg.length` and `arg.charCodeAt`. `undefined` or `null` at a `&str`, an array and a `Buffer` throw a `TypeError` from the glue; a number, boolean, plain object, symbol or bigint reaches the allocator with a `NaN` length and traps (`WebAssembly.RuntimeError: memory access out of bounds`; SIGBUS on Node 18.0 to 18.12 on darwin-arm64). Observed by the toolchain gate (2.2). Every argument at such a parameter is therefore either a string by construction (a string literal, a `+` concatenation with a string literal, a value under a `typeof x === 'string'` test) or is written `wasmString(x)` (15.3), which returns a string unchanged and throws `new TypeError('expected a string')` for anything else. It never converts (ZIP-026). |
 | `Date` | `f64` milliseconds, or six `f64` calendar fields | TypeScript calls `getTime()` or the getter family (R7). |
 | `Buffer` / `Uint8Array` | `&[u8]` | copied by the glue. At most `MAX_CHUNK` bytes of payload per call (5.4). |
-| any other value at a `&[u8]` parameter | `&[u8]` | Never allowed to happen. The release glue does not validate: it copies with `Uint8Array.prototype.set`, so a string is copied character by character through `ToNumber` (`'123'` becomes the bytes `01 02 03`, any non-digit becomes `00`) and nothing is thrown. TypeScript converts with `Buffer.from(x)` where upstream accepts a string (keys, passwords, salts) or throws a `TypeError` first (V14, 7.9). |
+| any other value at a `&[u8]` parameter | `&[u8]` | Never allowed to happen. The release glue does not validate: it copies with `Uint8Array.prototype.set`, so a string is copied character by character through `ToNumber` (`'123'` becomes the bytes `01 02 03`, any non-digit becomes `00`) and nothing is thrown; a typed array that is not a `Uint8Array` is copied element by element (a `Uint16Array` loses the high byte of every element), and an `ArrayBuffer` or a `DataView` has no `length` and arrives as zero bytes. TypeScript converts with `Buffer.from(x)` where upstream accepts a string (keys, passwords, salts) or throws a `TypeError` first (V14, 7.9). |
 | zlib level | `i32` | TypeScript passes `resolveLevel(options)` (7.7), so NaN never reaches the `ToInt32` conversion, which would turn it into level 0. |
 | optional number (`typeof mode === 'number'`) | `bool` + `i32` | never `Option<i32>`. |
 
@@ -2032,8 +2103,8 @@ export default class ZipArchiveOutputStream extends ArchiveOutputStream {
     const key = this._entryKey();
     const random = this._entryRandom();              // V10: drawn once per entry, here
     this._engine.setOffset(this.offset);             // archive-output-stream.js:92-97: the one offset is counted here (ZIP-135)
-    const status = this._engine.entry(ae.name, d.year, d.month, d.date, d.hours, d.minutes, d.seconds,
-      ae.namePrependSlash, ae.store, ae.comment, ae.mode !== undefined, ae.mode !== undefined ? ae.mode : 0,
+    const status = this._engine.entry(wasmString(ae.name), d.year, d.month, d.date, d.hours, d.minutes, d.seconds,
+      ae.namePrependSlash, ae.store, wasmString(ae.comment), ae.mode !== undefined, ae.mode !== undefined ? ae.mode : 0,
       resolveLevel(this.options.zlib), key, random,
       source !== null, source !== null ? source.length : 0, crc);
     this._drain();
@@ -2072,7 +2143,7 @@ export default class ZipArchiveOutputStream extends ArchiveOutputStream {
   }
 
   _finish() {                                        // :111-127
-    this._engine.setComment(this.getComment());
+    this._engine.setComment(wasmString(this.getComment()));   // 5.6: a non-string throws here, where upstream's Buffer.byteLength threw (:190)
     this._engine.setOffset(this.offset);             // :112 centralOffset = this.offset (ZIP-135)
     this._engine.finish();
     this._archive.centralOffset = this._engine.centralOffset();
@@ -2329,16 +2400,16 @@ class Pack extends Readable {
     if (pax) {
       for (const key in pax) this._wasm.paxRecord(' ' + key + '=' + pax[key] + '\n')   // headers.js:24-26
     }
-    this._wasm.encode(
-      header.name, header.typeflag === 5, header.mode,
-      header.uid.toString(8), header.gid.toString(8),
-      header.size, header.size.toString(8),
+    this._wasm.encode(                              // every string argument: 5.6
+      wasmString(header.name), header.typeflag === 5, header.mode,
+      wasmString(header.uid.toString(8)), wasmString(header.gid.toString(8)),
+      header.size, wasmString(header.size.toString(8)),
       header.mtime.getTime(),
       typeof header.type === 'string' ? header.type : '',
-      header.linkname ? header.linkname : undefined,
-      header.uname ? header.uname : undefined,
-      header.gname ? header.gname : undefined,
-      (header.devmajor || 0).toString(8), (header.devminor || 0).toString(8),
+      header.linkname ? wasmString(header.linkname) : undefined,
+      header.uname ? wasmString(header.uname) : undefined,
+      header.gname ? wasmString(header.gname) : undefined,
+      wasmString((header.devmajor || 0).toString(8)), wasmString((header.devminor || 0).toString(8)),
       !!pax)
     this.push(toBuffer(this._wasm.takeOutput()))
   }
@@ -2424,8 +2495,11 @@ before it.
   (`this.salt` itself keeps the caller's value, as upstream). `deriveKey(salt, key)` returns
   `{ aesKey, hmacKey, passwordVerifier }` as three Buffers sliced from
   `WasmAesHmacEtmStream.deriveKey(salt, key)` at 0..32, 32..64, 64..66 (a string `key` or
-  `salt` is first converted with `Buffer.from(x)`, which is what `pbkdf2Sync` does; a value
-  that is neither a string nor a Buffer/TypedArray throws a `TypeError`, as upstream). `_transform` and
+  `salt` is first converted with `Buffer.from(x)`, which is what `pbkdf2Sync` does; a
+  TypedArray that is not a `Uint8Array`, or a `DataView`, is first re-viewed as its bytes
+  with `Buffer.from(x.buffer, x.byteOffset, x.byteLength)`, because the glue would copy it
+  element by element or as nothing (5.6); a value that is neither a string nor a
+  Buffer/TypedArray/DataView throws a `TypeError`, as upstream). `_transform` and
   `_flush` call the wasm `transform` (once per slice of `MAX_CHUNK`, 5.4) / `flush` and push
   each non-empty result as a Buffer. `getTotalSize()` returns `this.totalSize`
   (aes-hmac-etm-stream.js:63-65), the mirrored field, so it still answers after the stream
@@ -2927,7 +3001,9 @@ Same statements, same order; the mutated object is what `'entry'` later emits
 (TAR-JSON-030).
 
 **TS-30 `for...in` and implicit string conversion.** Performed in TypeScript, result passed
-to Rust (7.8). Rust never iterates a map for output order.
+to Rust (7.8). Rust never iterates a map for output order. A value that reaches a string
+parameter of a wasm call and is not a string by construction goes through `wasmString`
+(5.6).
 
 **TS-31 Accumulating a stream into a Buffer** (`collectStream`, utils.js:5-27). Same three
 listeners, never removed, `Buffer.alloc(size)` plus `copy`.
@@ -3333,11 +3409,15 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 ykk-core = { path = "../ykk-core" }
-wasm-bindgen = "=0.2.100"   # provisional; the exact pin is confirmed or raised by the toolchain gate (2.2)
+wasm-bindgen = "=0.2.100"   # exact pin, confirmed by the toolchain gate (2.2); the glue behavior of 5.6 was observed with it
 
 [package.metadata.wasm-pack.profile.release]
-wasm-opt = false            # opt-level 3 and LTO already ran; the binaryen bundled with wasm-pack may reject newer wasm features
+wasm-opt = false            # opt-level 3 and LTO already ran; wasm-pack would run whichever wasm-opt is on PATH (2.2)
 ```
+
+Both manifests end with `[lints]` / `workspace = true` (15.1). With `Cargo.lock` as the gate
+resolved it, the ranges above are `flate2` 1.1.10 (`miniz_oxide` 0.9.1), `crc32fast` 1.5.2,
+`aes` 0.8.4, `ctr` 0.9.2, `hmac` 0.12.1, `sha1` 0.10.7, `pbkdf2` 0.12.2.
 
 There are no `[dev-dependencies]` in either crate. The tests under `crates/ykk-core/tests/`
 read no JSON: their inputs are generated Rust tables (14.3). They use only the crates
@@ -3359,9 +3439,11 @@ Runtime `dependencies` (exact list):
 | `minimatch` | `^10.2.2` | fixed decision; the range readdir-glob 3.0.0 declares |
 | `streamx` | `^2.28.1` | base classes of the tar engine (R2) |
 
-`devDependencies`: `typescript`, `tsup`, `tsx` (runs the one TypeScript test file, 14.3),
-`@types/node` (these four at the exact versions the toolchain gate recorded, 2.2),
-`mocha@11.7.5`, `chai@6.2.2`, `mkdirp@3.0.1`, `tar@6.2.1` (must stay on 6: the test uses
+`devDependencies`: `typescript@5.9.3`, `tsup@8.5.1`, `tsx@4.23.15` (runs the one TypeScript
+test file, 14.3), `@types/node@18.19.130` (these four at the exact versions the toolchain
+gate recorded, 2.2; `typescript` stays below 6 while the build uses tsup's `dts`, and
+`@types/node` stays on the 18 line so that `tsc` rejects an API the lowest supported Node
+does not have), `mocha@11.7.5`, `chai@6.2.2`, `mkdirp@3.0.1`, `tar@6.2.1` (must stay on 6: the test uses
 the default export), `yauzl@3.3.0`, `readable-stream@^4.7.0`, `should@^13.2.3`,
 `rimraf@^5.0.5`, `lazystream@^1.0.1`, `aes-js@3.1.2`, and for the differential tests
 `archiver@8.0.0` and `archiver-zip-encrypted@2.0.0` (which brings its own nested
@@ -3369,7 +3451,8 @@ the default export), `yauzl@3.3.0`, `readable-stream@^4.7.0`, `should@^13.2.3`,
 
 `package-lock.json` is committed and CI installs with `npm ci`. The transitive versions
 under the two oracle packages are not left to their caret ranges: `package.json` pins them
-with `overrides` to the versions the port was made from (15.4), and
+with `overrides` to the versions the port was made from (15.4; the three that are also
+direct dependencies of the root are pinned by the lockfile alone), and
 `scripts/verify-oracle-versions.mjs` checks the installed tree against the oracle table of
 14.2 before any differential or golden comparison runs.
 
@@ -3379,11 +3462,18 @@ Not dependencies, because they are ported: `async`, `buffer-crc32`, `is-stream`,
 
 ### 12.3 Tools
 
-Rust at the exact version in `rust-toolchain.toml` with the `wasm32-unknown-unknown` target
-(provisional `1.99.0`); `wasm-pack` at one exact version (provisional `0.15.0`; it fetches
-the `wasm-bindgen` CLI matching the pinned crate version). Both are fixed by the toolchain
-gate (2.2) and installed at exactly those versions in CI. Node >= 18 for running, building
-and testing (CI builds on every supported major); `7z` on `PATH` for five upstream tests (TESTS-092) and for the extraction
+Rust `1.99.0`, the exact version in `rust-toolchain.toml`, with the `wasm32-unknown-unknown`
+target and the `rustfmt` and `clippy` components (all three are listed in that file, so
+`rustup` installs them together with the toolchain, whatever its profile); `wasm-pack`
+`0.15.0` (it obtains the `wasm-bindgen` CLI matching the pinned crate version: a download
+where a prebuilt one exists, otherwise `cargo install wasm-bindgen-cli`, which the gate saw
+on macOS aarch64 and which builds with Rust 1.99.0). Both are fixed by the toolchain gate
+(2.2) and installed at exactly those versions in CI; `wasm-pack` comes from its release
+archive `wasm-pack-v0.15.0-<target>.tar.gz`. `rustfmt` 1.10.0 with its defaults is the
+formatter (there is no `rustfmt.toml`): the Rust listings of this guide are laid out for
+reading, and every Rust file is run through `cargo fmt` before it is handed over. Node >= 18
+for running; Node >= 18.18 for building and testing (`mocha` 11.7.5 and `node --import`
+need it; CI builds on every supported major); `7z` on `PATH` for five upstream tests (TESTS-092) and for the extraction
 checks; `tar` (bsdtar or GNU tar) for the extraction checks.
 
 ---
@@ -3455,6 +3545,7 @@ When the callback is not a function, the zip engine uses `_emitErrorCallback`
 | `Error('Callback was already called.')` | queue callback invoked twice |
 | whatever `readlinkSync` throws | `_updateQueueTaskWithStats` (core.js:467), three paths: thrown synchronously out of `file()` itself when `data.stats` is an `fs.Stats` (core.js:97-99, after `_entriesCount` was incremented); uncaught inside the lstat callback on the stat-queue path; a globber `'error'` on the glob path (GLOB-FS-072) |
 | `TypeError('zip20Header must be a Buffer of 12 bytes')`, `TypeError('header must be a Buffer of 12 bytes')` | `ZipCryptoStream` constructor and `_entryRandom`; `CryptoStream` constructor (V10, 7.9; ykk only) |
+| `TypeError('expected a string')` | `wasmString` at a string argument of a wasm call (5.6, 15.3; ykk only): `_engineEntry` and `_finish` of the zip engine (7.5), `Pack._encode` (7.8). Only for values outside the published types (V14); upstream throws a `TypeError` from a `Buffer` call at most of these sites. |
 
 ### 13.4 Errors from Rust
 
@@ -3938,7 +4029,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 rm -rf pkg
 wasm-pack build crates/ykk-wasm --release --target nodejs --out-dir ../../pkg --out-name ykk_wasm --no-pack
-rm -f pkg/.gitignore pkg/package.json pkg/README.md
+rm -f pkg/.gitignore pkg/package.json pkg/README.md pkg/ykk_wasm_bg.wasm.d.ts
 mv pkg/ykk_wasm.js pkg/ykk_wasm.cjs
 mv pkg/ykk_wasm.d.ts pkg/ykk_wasm.d.cts
 node -e "const w = require('./pkg/ykk_wasm.cjs'); if (typeof w.WasmZipStream !== 'function' || w.crc32Update(0, Buffer.from('test')) !== 3632233996) process.exit(1)"
@@ -3948,11 +4039,14 @@ The `nodejs` target emits CommonJS glue that reads `ykk_wasm_bg.wasm` next to it
 `fs.readFileSync` and instantiates it with `new WebAssembly.Module` /
 `new WebAssembly.Instance`, synchronously, when the file is required. That is the
 synchronous load the tests need (`new JsonArchive()` at module evaluation time, TESTS-015).
-The file is renamed to `.cjs` because the package is `"type": "module"`. The last line
+The file is renamed to `.cjs` because the package is `"type": "module"`. `wasm-pack` also
+writes `ykk_wasm_bg.wasm.d.ts`, the declarations of the raw wasm exports, which nothing
+imports; it is removed so that `pkg/` holds exactly the three files of 15.5. The last line
 fails the build if a future toolchain stops emitting CommonJS. The build is always
 `--release`: wasm-pack's dev profile makes the glue assert argument types, which would
 replace the number coercions that section 5.6 relies on with thrown errors. `wasm-opt` is
-switched off in the crate manifest (12.1). The last line runs under whatever Node executes
+switched off in the crate manifest (12.1): the gate confirmed that the build is complete
+without it, and that with it the result depends on whichever `wasm-opt` is on `PATH` (2.2). The last line runs under whatever Node executes
 the build; CI builds on every supported major including the lowest (Node 18), so a `.wasm`
 that the current Rust emits but an old V8 cannot load fails the build there, not at a
 user's site. The command line, the Rust version and the wasm-pack version are the ones the
@@ -4048,7 +4142,8 @@ import type { YkkWasm } from './wasm-types.js';
 
 export type { YkkWasm, WasmZipEntryInfo } from './wasm-types.js';
 
-const nodeRequire = createRequire(import.meta.url);
+// __filename exists in the CommonJS bundle; tsup's import.meta.url shim there mangles '#', '?' and '%' in the path.
+const nodeRequire = createRequire(typeof __filename === 'string' ? __filename : import.meta.url);
 
 /** The instantiated wasm module. Loaded synchronously when this module is evaluated. */
 export const wasm = nodeRequire('../pkg/ykk_wasm.cjs') as YkkWasm;
@@ -4062,12 +4157,28 @@ export const MAX_CHUNK = 1024 * 1024;
 export function toBuffer(u8: Uint8Array): Buffer {
   return Buffer.from(u8.buffer, u8.byteOffset, u8.byteLength);
 }
+
+/** Guards an argument of a `&str` or `Option<String>` parameter: the glue traps on most non-strings (5.6). */
+export function wasmString(value: unknown): string {
+  if (typeof value !== 'string') { throw new TypeError('expected a string'); }
+  return value;
+}
 ```
 
 `../pkg/ykk_wasm.cjs` is correct both from `src/` (unbundled) and from `dist/` (bundled):
 both directories sit one level below the package root. The call goes through `nodeRequire`,
-so the bundler leaves it alone (and so does a bundler in an application: 1.2). In the CJS
-bundle `import.meta.url` is supplied by tsup's `shims` option.
+so the bundler leaves it alone (and so does a bundler in an application: 1.2).
+`createRequire` accepts a path or a `file:` URL. In the ESM bundle and in unbundled ESM it
+gets a location derived from `import.meta.url`, which Node escapes correctly. In the CJS
+bundle it gets `__filename`: tsup's `shims` option would supply `import.meta.url` there as
+`new URL('file:' + __filename).href`, which drops everything after a `#` or `?` in the
+install path and decodes `%XX`, so the package could not find its wasm when installed
+under such a directory (observed by the gate, 2.2).
+
+`wasmString` is the one guard for string arguments (5.6). It is an addition with no
+upstream counterpart: a string passes through unchanged, so no call inside the contract of
+the published types behaves differently, and a value outside it becomes a `TypeError`
+thrown synchronously at the call site instead of a trap (V14).
 
 No TypeScript file imports types from `pkg/`. `tsc --noEmit` and every TypeScript unit
 therefore work without a Rust toolchain and before any Rust code exists; the interface
@@ -4166,9 +4277,13 @@ declare namespace archiver {
 export = archiver;
 ```
 
-This file could not be compiled when the guide was written (no toolchain in the document
-phase). The CommonJS TypeScript smoke check of section 16 item 4 compiles against it; if
-tsc rejects it, this section is corrected first (M8).
+The toolchain gate compiled this file with `typescript` 5.9.3 against the declarations
+tsup produced for a stand-in entry with the export list of 7.2 (2.2): `archiver('zip')`,
+`archiver.create`, `archiver.default`, `new archiver.ZipArchive()` and the type aliases
+resolve to real types, and a wrong member or argument is rejected. The alias list must
+follow 7.1 and 7.2: a type added to `src/types.ts` gets an alias here in the same change.
+The CommonJS TypeScript smoke check of section 16 item 4 compiles against the file in every
+CI job; if tsc rejects it, this section is corrected first (M8).
 
 Two module formats mean two module instances. `dist/index.mjs` and `dist/index.cjs` are
 separate bundles, so the `formats` registry of `src/vending.ts`, the `ArchiverError`
@@ -4178,9 +4293,9 @@ same process, and an `ArchiverError` created by one build is not `instanceof` th
 build's constructor. The README states this. Upstream ships one format per major (archiver
 7 CommonJS, archiver 8 ESM), so no upstream behavior is lost.
 
-`package.json` (scaffold unit; every field shown is binding. `version` is the version that
-is published. The exact versions of `typescript`, `tsup`, `tsx` and `@types/node` in
-`devDependencies` are the ones recorded by the toolchain gate, 2.2):
+`package.json` (scaffold unit; this is the whole file and every field is binding. `version`
+is the version that is published. The exact versions of `typescript`, `tsup`, `tsx` and
+`@types/node` in `devDependencies` are the ones recorded by the toolchain gate, 2.2):
 
 ```json
 {
@@ -4204,16 +4319,30 @@ is published. The exact versions of `typescript`, `tsup`, `tsx` and `@types/node
   "engines": { "node": ">=18" },
   "publishConfig": { "access": "public" },
   "dependencies": { "minimatch": "^10.2.2", "streamx": "^2.28.1" },
+  "devDependencies": {
+    "@types/node": "18.19.130",
+    "aes-js": "3.1.2",
+    "archiver": "8.0.0",
+    "archiver-zip-encrypted": "2.0.0",
+    "chai": "6.2.2",
+    "lazystream": "^1.0.1",
+    "mkdirp": "3.0.1",
+    "mocha": "11.7.5",
+    "readable-stream": "^4.7.0",
+    "rimraf": "^5.0.5",
+    "should": "^13.2.3",
+    "tar": "6.2.1",
+    "tsup": "8.5.1",
+    "tsx": "4.23.15",
+    "typescript": "5.9.3",
+    "yauzl": "3.3.0"
+  },
   "overrides": {
-    "archiver@8.0.0": {
-      "zip-stream": "7.0.5", "compress-commons": "7.0.1", "crc32-stream": "7.0.1", "crc-32": "1.2.2",
-      "tar-stream": "3.2.2", "streamx": "2.28.1", "b4a": "1.9.0", "readdir-glob": "3.0.0", "async": "3.2.6",
-      "buffer-crc32": "1.0.0", "is-stream": "4.0.1", "lazystream": "1.0.1", "normalize-path": "3.0.0"
-    },
-    "archiver-zip-encrypted@2.0.0": {
-      "archiver": "7.0.0", "zip-stream": "6.0.0", "compress-commons": "6.0.0", "crc32-stream": "6.0.0",
-      "archiver-utils": "5.0.1", "aes-js": "3.1.2", "buffer-crc32": "1.0.0"
-    }
+    "zip-stream@^7.0.0": "7.0.5", "compress-commons@^7.0.0": "7.0.1", "crc32-stream@^7.0.0": "7.0.1", "crc-32@^1.0.0": "1.2.2",
+    "tar-stream@^3.0.0": "3.2.2", "b4a@^1.0.0": "1.9.0", "readdir-glob@^3.0.0": "3.0.0", "async@^3.0.0": "3.2.6",
+    "buffer-crc32@^1.0.0": "1.0.0", "is-stream@^4.0.0": "4.0.1", "normalize-path@^3.0.0": "3.0.0",
+    "archiver@^7.0.0": "7.0.0", "zip-stream@^6.0.0": "6.0.0", "compress-commons@^6.0.0": "6.0.0", "crc32-stream@^6.0.0": "6.0.0",
+    "archiver-utils@^5.0.0": "5.0.1"
   },
   "scripts": {
     "build:wasm": "bash scripts/build-wasm.sh",
@@ -4242,6 +4371,29 @@ and checks the tarball; `prepack` builds again from the same sources when npm pa
 `overrides` block pins the oracle trees of 14.2; if npm does not honor one of the entries,
 `scripts/verify-oracle-versions.mjs` stops the run, and the entry is corrected here first.
 
+The block is flat: each key is a package with the major range its dependents ask for, each
+value the exact version of the oracle table. The two majors of `zip-stream`,
+`compress-commons` and `crc32-stream` are told apart by the range in the key, and
+`archiver@^7.0.0` leaves the root's own `archiver@8.0.0` alone. The form with one nested
+object per oracle package (`"archiver@8.0.0": { ... }`,
+`"archiver-zip-encrypted@2.0.0": { ... }`), which this guide first pinned, does not work
+with npm 10, the npm of Node 18, 20 and 22: after `npm install`, `zip-stream` 7.0.5 resolved
+`compress-commons` 6.0.0 and `crc32-stream` 6.0.0, and `npm ci` rejected the lockfile that the
+same npm had just written (`Missing: zip-stream@6.0.0 from lock file`); a lockfile written
+by npm 11 was rejected by npm 10 in the same way. With the flat block, npm 10.8.2, 10.9.4
+and 11.19.0 each install every row of the oracle table at its version, and `npm ci` of
+each of them accepts the lockfile of each other (2.2). The flat block also leaves the
+`crc32-stream@^5.0.0` that `compress-commons` 6.0.0 asks for at 5.0.1, which is what the
+lockfile of archiver-zip-encrypted 2.0.0 has; the nested form forced it to 6.0.0.
+
+Three packages of the oracle table have no entry: `streamx` (2.28.1), `lazystream` (1.0.1)
+and `aes-js` (3.1.2) are direct dependencies of the root, and npm refuses an override that
+differs from a direct dependency's own range (`EOVERRIDE`). They are held at the table's
+versions by `package-lock.json` (`aes-js` also by its exact range) and checked by
+`scripts/verify-oracle-versions.mjs` like the others. An override pins the whole
+development tree, not only the two oracle packages; it has no effect on what a consumer of
+the published package installs.
+
 `tsconfig.json`: `"target": "ES2022"`, `"module": "ESNext"`, `"moduleResolution": "Bundler"`,
 `"strict": true`, `"verbatimModuleSyntax": true`, `"types": ["node"]`, `"noEmit": true`,
 `"include": ["src"]` (the one TypeScript test file under `tests/unit` is executed by `tsx`
@@ -4259,19 +4411,27 @@ TESTS-106). The fixture and golden trees are excluded from every formatter.
 `LICENSE`. Nothing from `src/`, `crates/`, `tests/`, `.upstream/`.
 
 `scripts/check-tarball.mjs` (scaffold unit) is the executable form of that list: it runs
-`npm pack --json`, fails unless the file list contains `dist/index.mjs`, `dist/index.cjs`,
+`npm pack --json --pack-destination <temporary directory>` (which runs `prepack`, so it
+builds; the script reads the JSON report from the end of stdout, because the output of the
+`prepack` script precedes it there), fails unless the file list contains `dist/index.mjs`, `dist/index.cjs`,
 `dist/index.d.ts`, `dist/index.d.cts`, `cjs/index.cjs`, `cjs/index.d.cts`,
 `pkg/ykk_wasm.cjs`, `pkg/ykk_wasm_bg.wasm`, `pkg/ykk_wasm.d.cts` and nothing under `src/`,
 `crates/`, `tests/` or `.upstream/`, installs the tarball into an empty temporary project
 (together with `typescript` and `@types/node` at the repository's versions, for the two
-type checks) and runs the smoke checks of section 16 item 4 there, then deletes the
-tarball.
+type checks) and runs the smoke checks of section 16 item 4 there under the Node that runs
+the script (the two TypeScript files are `smoke.cts` and `smoke.mts`; a check that has not
+exited after 120 s fails), then deletes the temporary directory and the tarball in it.
+With `--spec <package spec>` it packs nothing and installs that spec instead, so that the
+same four checks can be run against the registry.
 
 `.github/workflows/ci.yml` (scaffold unit): on every push and pull request; matrix
 `ubuntu-latest` and `macos-latest` by Node 18, 20, 22, 24; steps: checkout, install `7z`
 (`p7zip-full` with apt, `p7zip` with brew; TESTS-092), set up Node, install the Rust
-toolchain named by `rust-toolchain.toml` with the wasm32 target, install `wasm-pack` at the
-pinned version, `npm ci`, `cargo fmt --check`, `cargo clippy --workspace -- -D warnings`,
+toolchain named by `rust-toolchain.toml` with the wasm32 target, `rustfmt` and `clippy`
+(`rustup toolchain install` with the channel read from that file), restore the cache of
+cargo downloads and of the `wasm-bindgen` CLI that `wasm-pack` fetches, install `wasm-pack`
+at the pinned version from its release archive, verified against a recorded SHA-256
+(12.3), `npm ci`, `cargo fmt --check`, `cargo clippy --workspace -- -D warnings`,
 `npm run build`, `npm run typecheck`, `npm test`, `node scripts/check-tarball.mjs`.
 
 `.github/workflows/release.yml` (scaffold unit): on a pushed tag `v<version>`; fails unless
@@ -4279,7 +4439,8 @@ the tag equals the `version` of `package.json`; same setup as CI on `ubuntu-late
 Node 22; `npm ci`; `npm publish` (which runs `prepublishOnly` and `prepack`), authenticated
 with the repository secret `NPM_TOKEN`; then `npm view @thilllon/ykk@<version> version`
 must print the version, and a fresh `npm install @thilllon/ykk@<version>` in an empty
-project must pass the smoke checks of section 16 item 4. The secret is the one thing the
+project must pass the smoke checks of section 16 item 4
+(`node scripts/check-tarball.mjs --spec @thilllon/ykk@<version>`). The secret is the one thing the
 repository owner has to provide.
 
 ---

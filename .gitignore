@@ -6,3 +6,5 @@ dist
 *.tgz
 .DS_Store
 /tmp
+tests/upstream/**/tmp
+tests/upstream/**/target
