@@ -37,7 +37,7 @@ impl Gzip {
         }
     }
 
-    // the 10-byte member header of node-archiver/lib/plugins/tar.js:28 (PORTING.md 6.4, R14)
+    // node-archiver/lib/plugins/tar.js:28 (the 10-byte header zlib.createGzip writes, PORTING.md 6.4, R14)
     fn header(&mut self, out: &mut Vec<u8>) {
         if !self.header_sent {
             out.extend_from_slice(&[
@@ -132,6 +132,32 @@ mod tests {
         let trailer = empty.len() - 8;
         assert_eq!(&empty[trailer..], &[0u8; 8]);
         assert_eq!(inflate(&empty[10..trailer]), Vec::<u8>::new());
+    }
+
+    #[test]
+    fn calls_after_finish() {
+        // PORTING.md 6.4: calls out of order
+        let mut gzip = Gzip::new(6, 0, 3);
+        let mut out = Vec::new();
+        gzip.write(b"this is a text file", &mut out).unwrap();
+        gzip.finish(&mut out).unwrap();
+        let len = out.len();
+        assert_eq!(
+            gzip.write(b"zz", &mut out),
+            Err(DeflateError("no progress".to_string()))
+        );
+        assert_eq!(out.len(), len);
+        assert_eq!(gzip.write(&[], &mut out), Ok(()));
+        assert_eq!(out.len(), len);
+
+        let mut gzip = Gzip::new(6, 0, 3);
+        let mut out = Vec::new();
+        gzip.write(b"this is a text file", &mut out).unwrap();
+        gzip.finish(&mut out).unwrap();
+        let len = out.len();
+        assert_eq!(gzip.finish(&mut out), Ok(()));
+        assert_eq!(out.len(), len + 8);
+        assert_eq!(&out[len..], &out[len - 8..len]);
     }
 
     #[test]

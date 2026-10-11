@@ -3,7 +3,7 @@ import type { ZlibOptions } from 'node:zlib';
 
 /** Throws exactly what Node throws for an invalid option bag, by constructing and closing
  *  the zlib object upstream would have constructed. No data is ever written to it. */
-// PORTING.md 7.7 (deps/compress-commons/lib/archivers/zip/zip-archive-output-stream.js:150, node-archiver/lib/plugins/tar.js:28)
+// deps/compress-commons/lib/archivers/zip/zip-archive-output-stream.js:150, node-archiver/lib/plugins/tar.js:28 (the zlib constructor calls, PORTING.md 7.7)
 export function validateZlibOptions(kind: 'deflateRaw' | 'gzip', options: unknown): void {
   if (kind === 'deflateRaw') {
     zlib.createDeflateRaw(options as ZlibOptions).close();

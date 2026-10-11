@@ -2,7 +2,6 @@
 use super::util::{get_short_bytes, get_short_bytes_value};
 
 const DATA_DESCRIPTOR_FLAG: u16 = 1 << 3;
-#[allow(clippy::identity_op)]
 const ENCRYPTION_FLAG: u16 = 1 << 0;
 const NUMBER_OF_SHANNON_FANO_TREES_FLAG: u16 = 1 << 2;
 const SLIDING_DICTIONARY_SIZE_FLAG: u16 = 1 << 1;

@@ -6,6 +6,7 @@ resolver = "2"
 [workspace.lints.clippy]
 debug_assert_with_mut_call = "deny"
 new_without_default = "allow"      # the pinned argument-less `new()` of CRC32Stream, GeneralPurposeBit, Pack, WasmPack mirror upstream constructors; no Default impls are added
+needless_range_loop = "allow"      # upstream's counting loops that index are ported as counting loops (deps/tar-stream/headers.js:237-238); RS-40
 
 [profile.release]
 opt-level = 3

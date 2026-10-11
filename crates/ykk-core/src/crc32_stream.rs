@@ -7,7 +7,7 @@ use crate::error::DeflateError;
 
 const DEFLATE_SPARE: usize = 32 * 1024;
 
-// deps/crc32-stream/lib/deflate-crc32-stream.js:6 (zlib level given to zlib.DeflateRaw), PORTING.md 6.4
+// deps/crc32-stream/lib/deflate-crc32-stream.js:6 (the zlib level given to zlib.DeflateRaw, PORTING.md 6.4)
 pub fn zlib_level(level: i32) -> Compression {
     if level < 0 {
         Compression::new(6)
@@ -18,7 +18,7 @@ pub fn zlib_level(level: i32) -> Compression {
     }
 }
 
-// deps/crc32-stream/lib/deflate-crc32-stream.js:23 (zlib write loop behind DeflateRaw and createGzip), PORTING.md 6.4
+// deps/crc32-stream/lib/deflate-crc32-stream.js:23 (the zlib write loop behind DeflateRaw and createGzip, PORTING.md 6.4)
 pub(crate) fn deflate(
     compress: &mut Compress,
     mut input: &[u8],
@@ -119,7 +119,7 @@ impl DeflateCRC32Stream {
         result
     }
 
-    // zlib end of the DeflateRaw that deps/crc32-stream/lib/deflate-crc32-stream.js:4 extends
+    // deps/crc32-stream/lib/deflate-crc32-stream.js:4 (the zlib end of the DeflateRaw this class extends, PORTING.md 6.4)
     pub fn _flush(&mut self, out: &mut Vec<u8>) -> Result<(), DeflateError> {
         let start = out.len();
         let result = deflate(&mut self.compress, &[], out, FlushCompress::Finish);
@@ -216,6 +216,39 @@ mod tests {
             assert_eq!(stream.size(false), 0);
             assert_eq!(stream.checksum, 0);
             assert_eq!(inflate(&out), Vec::<u8>::new());
+        }
+    }
+
+    #[test]
+    fn deflate_loop_exits() {
+        // PORTING.md 6.4: calls out of order
+        let mut stream = DeflateCRC32Stream::new(6);
+        let mut out = Vec::new();
+        stream._transform(b"this is a text file", &mut out).unwrap();
+        stream._flush(&mut out).unwrap();
+        let len = out.len();
+        assert_eq!(
+            stream._transform(b"zz", &mut out),
+            Err(DeflateError("no progress".to_string()))
+        );
+        assert_eq!(out.len(), len);
+        assert_eq!(stream.raw_size, 21);
+        assert_eq!(stream._transform(&[], &mut out), Ok(()));
+        assert_eq!(out.len(), len);
+        assert_eq!(stream._flush(&mut out), Ok(()));
+        assert_eq!(out.len(), len);
+        assert_eq!(stream.compressed_size, len as u64);
+
+        // one call whose output is larger than the reserve
+        let input = sample(3_000_000);
+        for level in [0, 1, 6] {
+            let mut stream = DeflateCRC32Stream::new(level);
+            let mut out = Vec::new();
+            stream._transform(&input, &mut out).unwrap();
+            assert!(out.len() > 4 * DEFLATE_SPARE, "level {level}");
+            stream._flush(&mut out).unwrap();
+            assert_eq!(stream.compressed_size, out.len() as u64);
+            assert_eq!(inflate(&out), input, "level {level}");
         }
     }
 

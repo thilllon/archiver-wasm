@@ -16,7 +16,7 @@ function beforeFirstCall(instance: Readable, method: '_read', callback: (this: R
 // node-archiver/node_modules/lazystream/lib/lazystream.js:23
 export class Readable extends PassThrough {
   constructor(fn: (options?: TransformOptions) => NodeJS.ReadableStream, options?: TransformOptions) {
-    super(options);
+    super({ ...options, autoDestroy: false, emitClose: false });   // PORTING.md V9
 
     beforeFirstCall(this, '_read', function() {
       var source = fn.call(this, options);

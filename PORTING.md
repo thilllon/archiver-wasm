@@ -21,7 +21,7 @@ are cited from those `node_modules` trees). Precedence when sources disagree: th
 then this file, then `BEHAVIORS.tsv`, then `PORTMAP.tsv`. If this file is wrong about
 upstream, fix this file first (section 2, rule M8), then the code.
 
-Section map: 1 goals, 2 method (2.1 compile-fix and test-fix, 2.2 toolchain gate), 3 decisions (conflicts, deviations, preserved defects,
+Section map: 1 goals, 2 method (2.1 compile-fix and test-fix, 2.2 toolchain gate, 2.3 what the trial run changed and the checks it added), 3 decisions (conflicts, deviations, preserved defects,
 non-ports), 4 layout, 5 layer boundary and the wasm API, 6 pinned Rust interfaces, 7 pinned
 TypeScript interfaces, 8 JS to Rust patterns, 9 JS to TypeScript patterns, 10 numeric
 semantics, 11 semantic traps, 12 dependency policy, 13 error model, 14 test strategy,
@@ -96,7 +96,19 @@ M2. **The port looks like the original was transpiled.** Same file boundaries (o
     `_writeLocalFileHeader` is Rust `_write_local_file_header`), same statement order, same
     branch order, same constants with the same names (including unused ones). A reviewer who
     knows the upstream file must be able to read the port side by side with it. Every ported
-    function carries a one-line comment with its upstream `path:line`.
+    function carries a one-line comment with its upstream `path:line`. The reference comes
+    first and is complete: the path as this guide cites it, relative to `.upstream/`
+    (`// deps/crc32-stream/lib/deflate-crc32-stream.js:18-24`, never a bare
+    `// deflate-crc32-stream.js:18`), then the line or range. Anything else (which part of
+    the line, a section of this guide) follows it in parentheses. A helper that has no
+    upstream function of its own but stands in for an upstream statement (the deflate loop,
+    the gzip header, `validateZlibOptions`) cites that statement in the same form:
+    `// node-archiver/lib/plugins/tar.js:28 (the 10-byte header zlib.createGzip writes, PORTING.md 6.4)`.
+    Only a function that stands in for nothing upstream (`resolveLevel`, `wasmString`)
+    carries `// PORTING.md <section>` instead. The listings and skeletons of sections 5 to
+    7 shorten the path to save room (`// :62-72`, `// crc32-stream.js:5-10`); the files
+    spell it out. A file that a section marks "verbatim" is the exception: it carries
+    exactly the comments of its listing.
 
 M3. **The upstream JavaScript test suites are the language-independent oracle.** They are
     vendored verbatim and run unmodified (section 14.1). No test is skipped, deleted or
@@ -147,11 +159,18 @@ Unit loop, per `PORTMAP.tsv` unit:
 1. Implementer receives: this file, the unit's `PORTMAP.tsv` rows, the `BEHAVIORS.tsv` rows
    whose target is in the unit, and read access to `.upstream/`. Writes the target files
    and, for every Rust file, its `#[cfg(test)]` module with the vectors that the table of
-   section 14.3 assigns to that file, under the test names pinned there.
+   section 14.3 assigns to that file, under the test names pinned there. Hands in, with the
+   files, a list of every place where this guide left a choice open or contradicted itself
+   or upstream (a helper without a pinned signature, a loop without a pinned exit, a
+   counter without a pinned width, a spelling that does not type-check). The implementer
+   decides nothing of that kind silently.
 2. Reviewer A (fidelity) and reviewer B (conformance) each produce findings with evidence.
-   Reviewer B also checks that every vector assigned to the unit in 14.3 is present.
+   Reviewer B also checks that every vector assigned to the unit in 14.3 is present. Both
+   run the checks of the table in 2.3 that carry their letter.
 3. Fixer verifies and applies. Rejected findings are answered with upstream evidence.
-4. A finding that reveals a guide problem is applied to this file first (M8).
+4. A finding that reveals a guide problem, and every entry of the implementer's list of
+   step 1, is applied to this file first (M8), together with the stale rows of
+   `PORTMAP.tsv` and `BEHAVIORS.tsv` it touches.
 
 ### 2.1 After the unit loop: compile-fix and test-fix
 
@@ -162,7 +181,10 @@ phases after the loop need their own rule for who edits what and who reviews it.
    is one compilation unit, so all `rs-*` core units are fixed together and the
    `depends_on` column of `PORTMAP.tsv` gives no order inside it); (b) `ykk-wasm`;
    (c) `scripts/build-wasm.sh` and `scripts/check-wasm-types.mjs`; (d) `tsc --noEmit`;
-   (e) `tsup`. One fixer per stage. That fixer may edit any file of the stage.
+   (e) `tsup`. One fixer per stage. That fixer may edit any file of the stage. Stages (a)
+   and (b) are closed with `cargo fmt --check` and `cargo clippy --workspace -- -D warnings`
+   clean. A lint that fires on an upstream spelling is settled by RS-40 (the list of 15.1),
+   never by rewriting the expression or by an attribute on the item.
 2. Every compile-fix edit is recorded as (file, upstream `path:line` of the statement it
    touches, reason) in the pull request description. An edit that changes only types,
    imports, visibility, lifetimes or borrow plumbing needs no further review. Any other
@@ -273,6 +295,44 @@ What the gate found, and where this guide changed because of it:
   (`mocha` 11.7.5 declares it, and `mocha -n import=tsx` needs `node --import`), which the
   Node 18 job of CI satisfies (12.3).
 
+### 2.3 What the trial run changed, and the checks it added
+
+Three units (rs-crc-deflate, rs-zip-util, ts-helpers) were written, reviewed and fixed
+before the others, to test this guide rather than the code. Every problem their
+implementers and fixers reported was checked against upstream and against the written
+files and then fixed here first (M8); the files of the three units agree with the guide as
+it stands now. The table lists each class of problem, where it is pinned now, and what a
+reviewer of every remaining unit checks because of it (A: the fidelity reviewer, B: the
+conformance reviewer).
+
+| # | Class of problem | Pinned in | Reviewer check |
+|---|---|---|---|
+| K1 | A loop around a C-style codec call (separate counts for input consumed and output produced) that stops when the input is consumed, although the codec still holds output behind a full buffer. | 6.4, 11.11 | A: the loop goes on while the call filled the output buffer. The crate has one such loop (`crc32_stream::deflate`); no unit writes a second one. |
+| K2 | A pinned loop without an exit for "consumed nothing, produced nothing". A status such as flate2's `Status::BufError` arrives as `Ok`, so mapping `Err` alone does not end the loop. | 6.4, 6.2, 13.4, 11.11 | B: every loop whose progress depends on a third-party call has a no-progress exit with a pinned error text. |
+| K3 | The upstream reference comment of a helper drifts into prose with a bare file name. | M2 | A: every function comment starts with the full `path:line`, relative to `.upstream/`. |
+| K4 | A note in this guide describes the implementation for one value of a flag only (`strip_trailing`); a porter who follows the note instead of upstream drops the other branch. | 6 (rules), 6.6 | A: for every parameter that selects a branch, each branch is ported from the cited upstream lines. B: the `#[cfg(test)]` module exercises every value of the flag. |
+| K5 | A JS coercion idiom (`\| 0`, then an unsigned Buffer write) carries a range check that throws; the Rust mapping has no such check. | 10.2 (domain column) | A: a throw outside the stated domain is not a finding; a different result inside it is. |
+| K6 | An item-level `#[allow(...)]` added because an upstream spelling was expected to trip a lint (`1 << 0` and `clippy::identity_op`: clippy exempts exactly that spelling). | RS-40, 15.1 | B: no `#[allow]` that this guide does not print; no expression rewritten to please a lint. |
+| K7 | A pinned TypeScript spelling that does not type-check against the pinned `@types/node` (`new zlib.DeflateRaw(...)`: `DeflateRaw` is only an interface in 18.x). | 7 (rules), 7.7, TS-41 | B: the unit's files were run through `tsc --noEmit` (the only errors left name an import of a unit that does not exist yet); an assertion that TS-41 does not list was reported, not improvised. |
+| K8 | A pinned spelling that departs from the upstream expression (`._read` where upstream has `[method]`). | 7 (rules), TS-41 | A: a type assertion wraps the upstream expression and changes nothing else. |
+| K9 | A base class replaced by another implementation (readable-stream 2 by `node:stream`) and treated as neutral, although the lifecycle defaults differ (`autoDestroy`, `emitClose`, what `pipe` and `read` do with an error). | V9, 7.4, 11.12 | A: every class whose base differs from upstream's passes the constructor options that V9 lists for it. |
+| K10 | An `Object.defineProperties` block folded into an object literal, which changes `writable`, `enumerable` and `configurable`. | TS-42, 7.3 | A: property descriptors are ported as descriptors. |
+| K11 | State, widths and out-of-order behavior that a pinned struct or signature leaves open (the name of a shared helper, the type of a counter, a second `finish`, a parameter the body does not read). | 6 (rules), 6.4, 6.6 | B: nothing of that kind was decided silently; the implementer's list names each case (unit loop step 1). |
+| K12 | A stale row: a `depends_on` that misses an import, a `BEHAVIORS.tsv` target naming an item that the pinned call path does not reach, a note that assigns another unit's test to this one. | 3.5 | B: `depends_on` lists every file of another unit that a target file imports; every target item exists and is reached. |
+
+Rules for whoever changes a pin in this guide (they are how the rows above were fixed):
+
+1. A TypeScript snippet is compiled with the pinned `typescript` and `@types/node` before
+   it is pinned. A statement that a lint fires, or stays silent, is checked with the pinned
+   `clippy` first.
+2. A pin keeps the upstream expression and adds only the type or the assertion.
+3. A note under a signature with a flag covers every value of the flag, or cites the
+   upstream line range and adds nothing.
+4. A pinned loop lists all of its exits. A pinned struct lists all of its state.
+5. Where a base class or a library is substituted, the behavior of both sides is observed
+   by running them, on the lowest and the highest supported Node, and recorded in 3.2. It
+   is never assumed to be the same.
+
 ---
 
 ## 3. Decisions
@@ -284,7 +344,7 @@ choice open in the places below. The resolution is binding.
 
 | # | Conflict | Resolution |
 |---|---|---|
-| R1 | Stream base class: readable-stream v4 (what core.js:12, utils.js:2, json.js:1 and archive-output-stream.js:3 import) or `node:stream` (glob-fs and tests inventories). | `node:stream` everywhere in `src/` (Node >= 18). readable-stream v4 is a snapshot of Node 18 streams, the oracle passes either way, and one stream implementation avoids mixed pipes. `readable-stream@^4` stays a devDependency because the unmodified test helper imports it (node-archiver/test/helpers/index.js:5). Exception: the tar engine (`Pack`, `Sink`) keeps extending `streamx` classes exactly as deps/tar-stream/pack.js:1 does (R2). |
+| R1 | Stream base class: readable-stream v4 (what core.js:12, utils.js:2, json.js:1 and archive-output-stream.js:3 import) or `node:stream` (glob-fs and tests inventories). | `node:stream` everywhere in `src/` (Node >= 18). readable-stream v4 is a snapshot of Node 18 streams, the oracle passes either way, and one stream implementation avoids mixed pipes. lazystream stood on readable-stream 2, which has a different lifecycle; what the port does about it is V9 and 7.4. `readable-stream@^4` stays a devDependency because the unmodified test helper imports it (node-archiver/test/helpers/index.js:5). Exception: the tar engine (`Pack`, `Sink`) keeps extending `streamx` classes exactly as deps/tar-stream/pack.js:1 does (R2). |
 | R2 | Tar engine streams: emulate streamx hooks (`_open`, `_predestroy`, `eagerOpen`) on Node streams, or keep streamx. | Keep `streamx` as a runtime dependency. `src/tar-stream/pack.ts` is then a literal port of pack.js. Consequence: `Tar.unpipe` without gzip still throws the upstream TypeError (TAR-JSON-016/104, section 3.3 P9). |
 | R3 | Task queue: keep `async` or port a minimal queue. One inventory said processing starts "on a later macrotask". | Port to `src/queue.ts` (section 7.3). Processing is scheduled with `queueMicrotask` (node-archiver/node_modules/async/internal/setImmediate.js:24-25), not a macrotask. |
 | R4 | JSON format: the fixed architecture puts "json plugin format" in `ykk-core`; the tar-json and tests inventories show the output is `JSON.stringify` of live JS objects (user keys, `Date`, `fs.Stats`). | Refinement: Rust computes only what is derived from bytes, the CRC-32 (`ykk_core::json::append`). `src/plugins/json.ts` keeps the `files` array and calls `JSON.stringify` exactly like json.js:39-42. |
@@ -320,7 +380,7 @@ number.
 | V6 | The second argument of a zip engine entry callback is the TypeScript `ZipArchiveEntry` record filled from a snapshot taken when the entry completes. Mutations the central directory pass makes later (zip64 extra, version 45) are not reflected on it. | The live entry is owned by Rust. Archiver core ignores the argument (core.js:172). |
 | V7 | `ZipArchiveEntry` setter errors that depend on negative numbers or wrong classes are unrepresentable in Rust and not ported there: `'invalid entry compressed size'`, `'invalid entry size'`, `'invalid entry crc32'`, `'invalid entry GeneralPurposeBit'` (zip-archive-entry.js:218-261). `'invalid entry compression method'` and `'invalid entry time'` survive on the TypeScript `ZipArchiveEntry` (section 7.6). | Unsigned types. No ykk code path can trigger them. |
 | V8 | A zlib processor error that never emits `'end'` (ZIP-053) cannot happen; the ZipCrypto unhandled-rejection hang (ENCRYPTED-047) cannot happen. Where the ykk engine itself fails in the middle of an entry (`ZipError::Deflate`, `ZipError::EntryTooLarge`), the error is not stored and lost as upstream's processor error is: it is delivered through the entry callback (13.4). | The failing component no longer exists; a failure of its replacement must be visible. |
-| V9 | `node:stream` replaces readable-stream v4 (core, utils, json, zip engine) and readable-stream v2 (lazystream). | R1. Differences are limited to default buffering thresholds on newer Node versions. |
+| V9 | `node:stream` replaces readable-stream v4 (core, utils, json, zip engine) and readable-stream v2 (lazystream). The v4 classes pass no extra constructor options: v4 is a snapshot of the Node 18 streams and has the same lifecycle defaults (`autoDestroy` and `emitClose` on). readable-stream 2.3.8 has neither option: upstream's lazy stream is never destroyed by its own end or by an error, and never emits `'close'`. `lazystream.Readable` is therefore constructed with `autoDestroy: false, emitClose: false` (7.4), which restores both, also on the path with no `'error'` listener (P22): the error handler of `pipe` then emits again synchronously instead of destroying the stream. Two differences remain on the lazy stream itself: it emits `'end'` before `'finish'` (v2: `'finish'` first), and a factory `fn` that throws arrives as an `'error'` event where v2 lets the exception escape from `read()`. | R1. For the v4 classes the differences are limited to default buffering thresholds on newer Node versions. For lazystream: no ykk engine listens for `'finish'` or `'close'` on a source, and archiver's factory is `createReadStream(task.filepath)` after an `lstat` of the same path succeeded (core.js:457-459). Observed by running lazystream 1.0.1 and the port side by side on Node 18.0, 18.20, 20, 22 and 24: with the two options the events and the `destroyed` flag are equal for a file read to its end, for an open error with a listener and for one without; with the `node:stream` defaults the port also emits `'close'` and ends up destroyed. GLOB-FS-092, GLOB-FS-095. |
 | V10 | New option `zip20Header` (12 bytes) on `ZipCryptoStream` / `ZipEncrypted` options and `header` on `CryptoStream` options: when present it replaces `crypto.randomBytes(12)` (crypto-stream.js:33). Bytes 10 and 11 are still overwritten with the CRC check bytes. The option must be a `Buffer` of exactly 12 bytes; anything else throws a `TypeError` in TypeScript (7.9). ykk also draws the per-entry random bytes at a different time than upstream: once at the start of every entry, before the local header, also for entries with no payload. Upstream draws the 12 ZipCrypto bytes inside the first `CryptoStream._transform` (crypto-stream.js:32-33), so only for entries with at least one payload byte and after the entry was compressed, and the AES salt in `_smartStream` after the local header (zip-aes-stream.js:151-153, 162). The number and order of `crypto.randomBytes` calls is therefore not part of the contract (ENCRYPTED-117); tests inject through `options.salt` / `zip20Header` / `header` and never through a stub that depends on the call count. | Project rule: random salts and IVs must be injectable. Upstream has an injection point only for the AES salt (`options.salt`, zip-aes-stream.js:162). The bytes are an argument of the one wasm call that starts the entry (5.3). |
 | V11 | The `Archiver` constructor also accepts the archiver 7 form `(format, options)`: if the first argument is a string it is ignored and the second is the options object. | R19. In archiver 8 a string first argument would be spread into characters, which nobody relies on. |
 | V12 | `Zip`, `Tar` and `Json` plugin instances carry `supports = { directory: true, symlink: true }` as in archiver 7 (archiver-zip-encrypted/node_modules/archiver/lib/plugins/zip.js:33). | Needed by `setModule` (R19). Not serialized, not otherwise read. |
@@ -370,7 +430,7 @@ Upstream code that is deliberately not ported. Nothing else may be omitted.
 | N2 | crc-32 `bstr`, `str`, `table`, `version` (deps/crc-32/crc32.js). | Not on any write path (ZIP-121). |
 | N3 | tar-stream reader side: `decode`, `decodePax`, `decodeLongPath`, `decodeOct`, `parse256`, `decodeStr`, `toType`, `indexOf`, `clamp` in headers.js, and all of extract.js. | ykk writes archives. Tests read them with independent tools (TAR-JSON-095..100). |
 | N4 | streamx and b4a sources. | streamx stays an npm dependency (R2); b4a calls become `Buffer` calls. |
-| N5 | `lazystream.Writable`; is-stream predicates other than `isStream`; async.queue members other than those in section 7.3; `deps/readdir-glob/src/cjs.ts`. | Unused by archiver. |
+| N5 | `lazystream.Writable`, and the guard that makes `lazystream.Readable` callable without `new` (lazystream.js:24-25); is-stream predicates other than `isStream`; async.queue members other than those in section 7.3, which names what is left out (among it the per-task callback and the promise that `push` returns); the `wrap` closure around the defer of async/internal/setImmediate.js:18-20, 34; `deps/readdir-glob/src/cjs.ts`. | Unused by archiver: it constructs the lazy stream with `new` (core.js:457), pushes without a callback and ignores what `push` returns (core.js:104, 107, 414, 555, 781). The port of `lazystream.Readable` is an ES class (7.4), which cannot be called without `new`. |
 | N6 | archiver-zip-encrypted `support/issue-*.js`, its `eslint .` pretest, nyc. | Manual repro scripts and style tooling, not tests (TESTS-100/101). |
 | N7 | The global monkey patch of `aes-js` (aes-hmac-etm-stream.js:16-25). | The Rust CTR implementation has a little-endian counter natively. The patch lives only in the test shim (section 14.1) so the unmodified test's own decryptor keeps working. |
 
@@ -381,7 +441,10 @@ this guide, which have no inventory source: ZIP-135 to ZIP-137 and ENCRYPTED-113
 ENCRYPTED-118; columns `id`, `upstream`, `symbol`, `layer`, `target`, `behavior`, `hazard`):
 
 - `target` lists every place that must implement or preserve the behavior, separated by
-  ` ; `, each as `path#item`. Rust items use `::`, TypeScript items use `.`. An item in
+  ` ; `, each as `path#item`. An item is one that the pinned call path really reaches:
+  where that path goes through `json::append` into `crc32::buf`, the target is `buf`, not
+  the same-valued `unsigned` that nothing on the path calls (TAR-JSON-112). Rust items use
+  `::`, TypeScript items use `.`. An item in
   parentheses (`#(module: every pub const of PORTING.md 6.5)`) names a group that the cited
   section of this guide enumerates. A target without `#` is the whole file. A target that
   starts with `NOT PORTED` points at a row of section 3.4 or 3.2. A target starting with
@@ -479,8 +542,12 @@ ENCRYPTED-118; columns `id`, `upstream`, `symbol`, `layer`, `target`, `behavior`
 is the number of upstream lines that row ports (the note says "about N of M" when that is
 less than the whole file); for the two fixture rows it is the file count, and for a
 `not-ported` row whose path is a glob it is 0. `depends_on` lists the target files whose
-pinned interfaces the row is written against. It is informational: all non-test units are
-written in parallel, and the Rust units of one crate compile together (2.1).
+pinned interfaces the row is written against: every file outside the row's own targets
+that a target imports, scaffold files included (`numeric.rs`, `error.rs`, `src/wasm.ts`,
+`src/types.ts`). It is informational: all non-test units are
+written in parallel, and the Rust units of one crate compile together (2.1). A note that
+mentions a test names the unit that owns it; the tests a unit writes itself are the
+`#[cfg(test)]` modules of its own files (4.1, 14.3).
 Rows with unit `not-ported` exist so that every upstream file is accounted for. "Every
 upstream file" means: every source file of the two repositories (`index.js`, `lib/**`,
 `test/**`, `support/**`, `examples/**`, `benchmark/**`), every source file of the eight
@@ -546,7 +613,7 @@ src/error.ts                                 node-archiver/lib/error.js
 src/utils.ts                                 node-archiver/lib/utils.js
 src/vending.ts                               archiver-zip-encrypted/node_modules/archiver/index.js (archiver 7.0.0)
 src/queue.ts                                 node-archiver/node_modules/async/internal/queue.js (subset, 7.3)
-src/lazystream.ts                            node-archiver/node_modules/lazystream/lib/lazystream.js (Readable)
+src/lazystream.ts                            node-archiver/node_modules/lazystream/lib/lazystream.js (Readable; pinned, 7.4)
 src/is-stream.ts                             node-archiver/node_modules/is-stream/index.js (isStream)
 src/normalize-path.ts                        node-archiver/node_modules/normalize-path/index.js
 src/readdir-glob.ts                          deps/readdir-glob/src/index.ts
@@ -1013,6 +1080,18 @@ they keep the upstream name when upstream has one. Rules for all of `ykk-core`:
 - A method that upstream defines on a class is an inherent method with the snake_case name.
   A module-level upstream function is a module-level `pub fn`.
 - Output parameters are `out: &mut Vec<u8>`; bytes are appended, never replaced.
+- A parameter that a pinned signature has and the body does not read is written with a
+  leading underscore (`_compressed` in `CRC32Stream::size`). The name is not part of the
+  signature; rustc warns on an unused parameter and warnings fail the clippy gate.
+- A note under a listing never replaces the upstream lines it cites. Where a function has a
+  parameter that selects a branch (`strip_trailing`), every branch is ported from those
+  lines, also a branch that no caller in ykk takes, and the file's tests exercise every
+  value. A note that describes one value only is a defect of this guide (2.3, K4).
+- What a sans-IO method does when it is called out of order is stated with the method (6.4,
+  6.8). Such a call gets no flag and no error variant that this guide does not list:
+  upstream has no such state. Where nothing is stated, the unit reports it (unit loop
+  step 1) and does not invent a guard.
+- Lints: RS-40. No `#[allow(...)]` attribute other than the ones printed in this guide.
 
 ### 6.1 Module tree (pinned text; `lib.rs` belongs to the scaffold unit, each `mod.rs` to the unit named in its comment)
 
@@ -1103,6 +1182,11 @@ impl std::error::Error for ZipError {}
 impl From<DeflateError> for ZipError { fn from(e: DeflateError) -> Self { ZipError::Deflate(e.0) } }
 ```
 
+`DeflateError.0` is one of two texts, both produced by the deflate loop of 6.4 and by
+nothing else: the `Display` of flate2's `CompressError` when `compress_vec` returns `Err`
+(`deflate compression error`), or `no progress`. They surface as
+`deflate error: deflate compression error` and `deflate error: no progress` (13.4).
+
 There is no `TarError`: the Rust tar functions cannot fail (`headers::encode` returns
 `Option`). All tar error messages (`'Size mismatch'`, `'No body allowed for this entry'`,
 `'already finalized or destroyed'`, ...) are raised by the TypeScript `Sink` / `Pack`.
@@ -1136,7 +1220,8 @@ pub fn write_at(buf: &mut [u8], s: &str, offset: usize);
 pub fn buf(b: &[u8], seed: u32) -> u32;
 /// buffer-crc32 `crc32.unsigned(buf)` (json.js:60, zip-aes-stream.js:149): equal to
 /// `buf(b, 0)`. Kept as the named whole-buffer form for native callers and tests; the wasm
-/// path feeds slices through `buf` with a seed (5.4).
+/// path feeds slices through `buf` with a seed (5.4), so nothing in ykk-core or ykk-wasm
+/// calls it outside tests. It is `pub`, so that is no dead code.
 pub fn unsigned(buf: &[u8]) -> u32;
 
 // crc32_stream.rs
@@ -1146,13 +1231,19 @@ pub fn unsigned(buf: &[u8]) -> u32;
 /// as Node's zlib does, ZIP-136.)
 pub fn zlib_level(level: i32) -> flate2::Compression;
 
+/// The write loop of zlib, which Node runs natively behind zlib.DeflateRaw and
+/// zlib.createGzip. The only caller of compress_vec in the crate; `_transform`, `_flush` and
+/// gzip.rs go through it. Appends to `out`. Body and exits are pinned below the listing.
+pub(crate) fn deflate(compress: &mut flate2::Compress, input: &[u8], out: &mut Vec<u8>, flush: flate2::FlushCompress)
+    -> Result<(), DeflateError>;
+
 pub struct CRC32Stream { pub checksum: u32, pub raw_size: u64 }
 impl CRC32Stream {
     pub fn new() -> Self;                                            // crc32-stream.js:5-10
     pub fn _transform(&mut self, chunk: &[u8], out: &mut Vec<u8>);   // :11-17, appends chunk unchanged
     pub fn digest(&self) -> [u8; 4];                                 // :18-22, BIG-endian
     pub fn hex(&self) -> String;                                     // :23-25, upper case
-    pub fn size(&self, compressed: bool) -> u64;                     // :26-28, ignores the argument
+    pub fn size(&self, compressed: bool) -> u64;                     // :26-28, ignores the argument (written `_compressed`)
 }
 
 pub struct DeflateCRC32Stream { /* flate2::Compress (raw, no zlib header), */ pub checksum: u32, pub raw_size: u64, pub compressed_size: u64 }
@@ -1164,10 +1255,15 @@ impl DeflateCRC32Stream {
     pub fn hex(&self) -> String;                                     // :30-32
     pub fn size(&self, compressed: bool) -> u64;                     // :33-39
 }
-// `push` override (:12-17): every byte appended to `out` by _transform/_flush is added to compressed_size.
+// `push` override (:12-17): a private `fn push(&mut self, chunk: &[u8])` that adds chunk.len() to
+// compressed_size. _transform and _flush call it once, with the bytes `deflate` appended to `out`,
+// before they return the result of `deflate`: bytes appended by a call that then fails are counted too.
 
 // gzip.rs
-pub struct Gzip { /* raw deflate state, crc, input length, header_sent */ }
+pub struct Gzip {
+    /* compress: flate2::Compress (raw), crc: u32, input_length: u32, header_sent: bool,
+       xfl: u8, os: u8 (both fixed by new() and kept until the header is emitted) */
+}
 impl Gzip {
     /// level and strategy as JS gave them (defaults -1 and 0). os: the header OS byte (R14).
     pub fn new(level: i32, strategy: i32, os: u8) -> Self;
@@ -1190,13 +1286,45 @@ Gzip member layout (what Node's `zlib.createGzip` writes, TAR-JSON-005): 10-byte
 of the input little-endian, then input length modulo 2^32 little-endian. With `l` the
 resolved level (-1 gives 6): `XFL = 2` if `l == 9`, else `4` if `strategy >= 2 || l < 2`,
 else `0`. The header is hand-written (not `flate2::GzBuilder`), emitted with the first
-`write` or with `finish` if there was no write. An empty input still produces a full member.
+`write` (also a zero-length one) or with `finish` if there was no write. An empty input
+still produces a full member. `write` updates the CRC and the length before it deflates.
+The input length is a `u32` advanced with `wrapping_add(chunk.len() as u32)`; that is the
+"modulo 2^32" of the trailer.
 
-The deflate loop both stream types use (private helper in `crc32_stream.rs`, reused by
-`gzip.rs` as `pub(crate)`): call `Compress::compress_vec(input, out, flush)` in a loop,
-reserving at least 32 KiB of spare capacity in `out` before each call, advancing `input` by
-the growth of `total_in()`, until all input is consumed and (for `Finish`) the status is
-`StreamEnd`. `compress_vec` errors map to `DeflateError`.
+**The deflate loop** (`crc32_stream::deflate`, the listing above). Each iteration:
+`out.reserve(32 * 1024)`; note `compress.total_in()` and `out.len()`;
+`let status = compress.compress_vec(input, out, flush)`, where an `Err(e)` returns
+`Err(DeflateError(e.to_string()))`; advance `input` by the growth of `total_in()`. Then,
+in this order:
+
+1. **Done.** `input` is empty and the call has ended: return `Ok(())`. For
+   `FlushCompress::Finish` "ended" means `status == Status::StreamEnd`. For every other
+   flush it means the call left spare capacity, `out.len() < out.capacity()`.
+2. **No progress.** The call consumed no input and appended no output: return
+   `Err(DeflateError("no progress".to_string()))`.
+3. Otherwise go round again.
+
+Exit 1 looks at the output buffer because miniz_oxide returns as soon as the output slice
+is full, before it looks at its input (`if next_out.is_empty() { break Ok(MZStatus::Ok) }`
+in miniz_oxide 0.9.1 `src/deflate/stream.rs`): it can have taken all the input while it
+still holds compressed bytes. Node's zlib repeats its write for the same reason, while
+`availOutAfter === 0`. A loop that stops at "all input consumed" leaves those bytes inside
+until the next call. Exit 2 exists because the rust backend of flate2 reports "nothing
+could be done" as `Ok(Status::BufError)`, not as `Err`; without it the loop never ends
+when a caller writes after the stream was finished. A zero-length `input` with
+`FlushCompress::None` is such a `BufError` call and leaves through exit 1 (the reserve
+guarantees spare capacity), so an empty chunk is a no-op and not an error.
+
+Calls out of order. None of them is reachable from TypeScript: the shells of 7.5 and 7.7
+call `_flush` / `finish` once, from the `_flush` hook of a Node stream, and Node writes
+nothing after it. The outcomes are pinned so that no unit adds a "finished" flag:
+
+| Call | Outcome |
+|---|---|
+| `DeflateCRC32Stream::_transform` or `Gzip::write` with a non-empty chunk after `_flush` / `finish` | `checksum` and `raw_size` (gzip: the CRC and the length) are updated first, as upstream's statement order has it; then `Err(DeflateError("no progress"))`; nothing is appended |
+| the same with an empty chunk | `Ok(())`, nothing appended |
+| a second `DeflateCRC32Stream::_flush` | `Ok(())`, nothing appended |
+| a second `Gzip::finish` | `Ok(())`; the 8-byte trailer is appended again |
 
 ### 6.5 `zip/constants.rs`, `zip/unix_stat.rs` (unit rs-zip-util)
 
@@ -1228,17 +1356,17 @@ Types: `WORD, DWORD, SHORT, LONG: usize`; `EMPTY: &[u8] = &[]`; `SHORT_ZERO: [u8
 pub struct DateFields { pub year: f64, pub month: f64, pub date: f64, pub hours: f64, pub minutes: f64, pub seconds: f64 }
 
 pub fn date_to_dos(d: &DateFields) -> u32;                 // util.js:1-25 (forceLocalTime already applied by the caller)
-pub fn dos_to_date(dos: u32) -> DateFields;                // :26-35, fields for a LOCAL-time Date constructor
+pub fn dos_to_date(dos: u32) -> DateFields;                // :26-35, fields for a LOCAL-time Date constructor; not range-checked (below)
 pub fn from_dos_time(buf: &[u8]) -> Option<DateFields>;    // :36-38, None if buf is shorter than 4 bytes
 pub fn get_eight_bytes(v: u64) -> [u8; 8];                 // :39-44
 pub fn get_short_bytes(v: u64) -> [u8; 2];                 // :45-49  (v as u16, wrapping)
-pub fn get_short_bytes_value(buf: &[u8], offset: usize) -> Option<u16>;  // :50-52
+pub fn get_short_bytes_value(buf: &[u8], offset: usize) -> Option<u16>;  // :50-52, None if out of range
 pub fn get_long_bytes(v: u64) -> [u8; 4];                  // :53-57  (v as u32, wrapping)
-pub fn get_long_bytes_value(buf: &[u8], offset: usize) -> Option<u32>;   // :58-60
+pub fn get_long_bytes_value(buf: &[u8], offset: usize) -> Option<u32>;   // :58-60, None if out of range
 // toDosTime (:61-63): not ported, N1.
 
 // utils.rs
-pub fn normalize_path(path: &str, strip_trailing: bool) -> String;   // normalize-path/index.js:8-35
+pub fn normalize_path(path: &str, strip_trailing: bool) -> String;   // normalize-path/index.js:8-35; strip_trailing is `stripTrailing !== false`
 pub fn sanitize_path(filepath: &str) -> String;                      // zip-stream/utils.js:17-21 == zip-archive-entry.js:288-290
 
 // general_purpose_bit.rs
@@ -1266,11 +1394,32 @@ impl GeneralPurposeBit {
 }
 ```
 
-`date_to_dos` is a literal port (section 10.5). `normalize_path` operates on a Rust `&str`;
-the JS code indexes UTF-16 units, but every index it inspects (`path[2]`, `path[3]`,
-`path.slice(0, 2)`) is only meaningful when the first four characters are ASCII, where byte
-index and unit index coincide. Implement the split/join as: replace every maximal run of
-`/` or `\` by one `/` (a leading or trailing run survives as one `/`).
+`date_to_dos` is a literal port (section 10.5). `dos_to_date` is one too and validates
+nothing: it returns the six numbers upstream hands to the `Date` constructor, and they can
+lie outside the calendar (`dos_to_date(0)` has month `-1.0` and date `0.0`; `0xFFFFFFFF`
+gives year 2107, month 14, date 31, hours 31, minutes 63, seconds 62). The JS `Date`
+constructor would normalize them; a Rust caller must not assume valid ranges. No write
+path calls it.
+
+`get_short_bytes`, `get_long_bytes` and `get_eight_bytes` take `u64` whatever the integer
+type at the call site is; the call site widens with `as u64` and the function truncates,
+which is upstream's mask (10.1 has the types per quantity, RS-10 and RS-38 the call
+sites). `get_short_bytes_value`, `get_long_bytes_value` and `GeneralPurposeBit::parse`
+return `None` when `offset` plus the width lies past the end of `buf` or overflows `usize`
+(`buf.get(offset..offset.checked_add(2)?)?`); upstream throws a `RangeError` there (V13).
+
+`normalize_path` operates on a Rust `&str`; the JS code indexes UTF-16 units, but every
+index it inspects (`path[2]`, `path[3]`, `path.slice(0, 2)`) is only meaningful when the
+first four characters are ASCII, where byte index and unit index coincide. `len` is
+`numeric::utf16_len(path)`, because index.js:15-16 and 22 compare `path.length`. Lines
+30-34 are ported as written, with both values of the flag: split at every maximal run of
+`/` or `\` into `segs` (a leading or a trailing run leaves an empty first or last segment);
+`if strip_trailing && segs.last() == Some(&"") { segs.pop(); }`; join with `/`. With
+`strip_trailing = false` the result is "every run replaced by one `/`", so a trailing run
+survives as one `/` (`'a/b/'` stays, `'//'` gives `'/'`). With `true` the trailing run is
+dropped (`'a/b/'` gives `'a/b'`, `'//'` gives `''`). Every upstream call site passes `false`
+(zip-stream/utils.js:18, zip-archive-entry.js:288), and so do `sanitize_path` and
+`set_name`; the `true` branch is ported and tested all the same (14.3).
 
 ### 6.7 `zip/archive_entry.rs`, `zip/zip_archive_entry.rs` (unit rs-zip-entry)
 
@@ -1519,6 +1668,7 @@ fn zip20_smart_stream_write(&mut self, chunk: &[u8]) -> Result<(), ZipError>;
 fn zip20_smart_stream_end(&mut self) -> Result<(), ZipError>;
 
 // zip_aes_stream.rs
+pub(crate) const ZIP_AES_METHOD: i32 = 99;                                      // :11; i32 like every method constant (10.1)
 pub(crate) fn _build_aes_extra_field(ae: &ZipArchiveEntry) -> [u8; 11];         // :30-40
 fn aes_write_local_file_header(&mut self, ae: &mut ZipArchiveEntry);
 fn aes_write_central_file_header(&mut self, ae: &mut ZipArchiveEntry);
@@ -1762,7 +1912,15 @@ General rules for all of `src/`:
   forbidden everywhere.
 - The only escape hatch for an expression that upstream types dynamically is a type
   assertion on that one expression, with the spellings pinned in TS-41. No `any`, no
-  `@ts-ignore`, no added narrowing branch.
+  `@ts-ignore`, no added narrowing branch. The assertion wraps the upstream expression and
+  changes nothing else in it (`delete instance[method]` stays a computed member access).
+- Every TypeScript snippet of this guide was compiled with the pinned `typescript` and
+  `@types/node` (12.2) before it was pinned. A pinned spelling that `tsc` rejects is a
+  defect of this guide: report it (unit loop step 1), do not pick another spelling
+  silently. `@types/node` 18 declares several zlib and stream classes only as interfaces;
+  use the factory function upstream's constructor is equivalent to (7.7).
+- A class whose base class is not upstream's passes the constructor options that V9 lists
+  for it (11.12). Property descriptors are ported as descriptors (TS-42).
 - Class fields that upstream assigns in a subclass constructor are declared once on the base
   class and never redeclared in a subclass (ARCHIVER-CORE-005).
 - Every upstream `setImmediate`, `setTimeout`, `queueMicrotask`, `process.nextTick` and
@@ -1988,31 +2146,74 @@ export interface QueueObject<T> {
 export function queue<T>(worker: QueueWorker<T>, concurrency?: number | null): QueueObject<T>;
 ```
 
-Exact semantics (node-archiver/node_modules/async/internal/queue.js):
+The file keeps the shape of its four upstream sources, so that it reads side by side with
+them (the `PORTMAP.tsv` rows of queue.js, async/queue.js, onlyOnce.js and setImmediate.js):
+
+```ts
+function onlyOnce<A extends unknown[]>(fn: ((...args: A) => void) | null) { ... }    // async/internal/onlyOnce.js:7-13, literal
+const _setImmediate = queueMicrotask;                                                // async/internal/setImmediate.js:24-25
+function _queue<T>(worker: (items: T[], callback: (err?: Error | null) => void) => void,
+                   concurrency: number | null | undefined, payload: number): QueueObject<T> { ... }   // async/internal/queue.js:26-293
+export function queue<T>(worker: QueueWorker<T>, concurrency?: number | null): QueueObject<T> {       // async/queue.js:7-12
+  var _worker = worker;                                                              // wrapAsync is not ported
+  return _queue<T>((items, cb) => { _worker(items[0], cb); }, concurrency, 1);
+}
+```
+
+`_setImmediate` is `queueMicrotask` itself, captured when the module is evaluated as
+upstream captures its defer; the closure `(fn, ...args) => defer(() => fn(...args))` that
+upstream wraps around it (setImmediate.js:18-20, 34) is left out (N5).
+
+Exact semantics of `_queue` (node-archiver/node_modules/async/internal/queue.js):
 
 - `concurrency == null` gives 1; `concurrency === 0` throws
   `new RangeError('Concurrency must not be zero')` synchronously (queue.js:27-31). Nothing
   else is validated.
-- State: `_tasks` (FIFO array), `numRunning = 0`, `drainHandlers: Array<() => void> = []`,
-  `processingScheduled = false`, `isProcessing = false`.
-- `push(data)`: append `{ data }` to `_tasks`; if `!processingScheduled`, set it and call
-  `queueMicrotask(() => { processingScheduled = false; q.process(); })` (queue.js:90-96).
-  The worker never runs synchronously inside `push`.
-- `process()`: `if (isProcessing) return; isProcessing = true;` then
-  `while (numRunning < q.concurrency && _tasks.length)`: shift one task, `numRunning += 1`,
-  build a call-once callback and invoke `worker(task.data, cb)`; finally
-  `isProcessing = false` (queue.js:212-245; `payload` is 1, pause is not ported). The
+- State, all of it closure variables of `_queue` and none of it a property of `q`:
+  `_tasks: Array<{ data: T }>` (FIFO; upstream's `q._tasks` linked list, which the pinned
+  `QueueObject` does not expose), `numRunning = 0`, `drainHandlers: Array<() => void> = []`
+  (upstream's `events.drain`; `on`, `once`, `off` and `trigger` are reduced to assigning
+  and iterating this one array), `processingScheduled = false`, `isProcessing = false`.
+- `push(data)` returns `_insert(data)` (queue.js:67-104): append `{ data }` to `_tasks`; if
+  `!processingScheduled`, set it and call
+  `_setImmediate(() => { processingScheduled = false; q.process(); })` (queue.js:90-96).
+  The worker never runs synchronously inside `push`. Nothing is returned (upstream
+  returns a promise when no callback is given, queue.js:98-103).
+- `process()` (queue.js:212-245): `if (isProcessing) return; isProcessing = true;` then
+  `while (numRunning < q.concurrency && _tasks.length)`: the payload loop of lines 220-229
+  as written (`var l = _tasks.length; if (payload) l = Math.min(l, payload);`, then `l`
+  times `var node = _tasks.shift() as { data: T }; data.push(node.data);`),
+  `numRunning += 1`, `var cb = onlyOnce(_createCB()); _worker(data, cb);`; finally
+  `isProcessing = false`. `payload` is always 1, so one task is shifted per round and the
+  caller's worker receives `items[0]`. The pause test of line 219 is not ported. The
   `isProcessing` guard is required: archiver workers may call back synchronously
   (core.js:369, 389).
-- The callback (queue.js:106-135): a second invocation throws
-  `new Error('Callback was already called.')`; the first does `numRunning -= 1`, then
-  `if (q.idle())` calls every drain handler synchronously, then `q.process()`.
+- The callback (queue.js:106-135): `onlyOnce` makes a second invocation throw
+  `new Error('Callback was already called.')`; the first runs the function `_createCB()`
+  returned, which does `numRunning -= 1`, then `if (q.idle())` calls every drain handler
+  synchronously (`drainHandlers.forEach(handler => handler())`), then `q.process()`.
+  `_createCB` takes no `tasks` argument and its `err` parameter is not read: the loop of
+  lines 110-125 (the per-task callback, which only settles the promise `push` returned,
+  the `'error'` event and `workersList`) and the `'unsaturated'` trigger are not ported.
 - `idle()`: `_tasks.length + numRunning === 0` (queue.js:255-257).
-- `drain(handler)`: replaces the handler list with `[handler]` (queue.js:147-158).
-- `kill()`: clears the drain handler list and empties `_tasks`; running workers are not
-  interrupted and their callbacks still work; later pushes are still accepted and processed
+- `drain(handler)`: replaces the handler list with `[handler]` (queue.js:147-158:
+  `drainHandlers = []; drainHandlers.push(handler);`). It is not a member of the object
+  literal. As upstream, it is added afterwards with
+  `Object.defineProperties(q, { drain: { writable: false, value: (handler) => { ... } } })`
+  (queue.js:269-286, TS-42), which makes it non-writable, non-enumerable and
+  non-configurable; the literal is therefore asserted `as QueueObject<T>` (TS-41). The
+  form without a handler, which returns a promise (queue.js:148-155), is not ported.
+- `kill()`: `drainHandlers = []; _tasks.length = 0;`. Running workers are not interrupted
+  and their callbacks still work; later pushes are still accepted and processed
   (queue.js:191-194).
 - `length()` is `_tasks.length`; `running()` is `numRunning`.
+
+Left out of queue.js (N5; archiver uses none of it): `wrapAsync`, `workersList`, the
+events `error`, `saturated`, `unsaturated` and `empty` with their four
+`defineProperties` entries, `_createTaskItem` and the task callback, the promise results of
+`push` and `drain`, the array form of `push`, `pushAsync`, `unshift`, `unshiftAsync`,
+`remove`, `pause`, `resume`, `paused`, `started`, `buffer`, `payload` as a property, the
+iterator, and `_maybeDrain`.
 
 ### 7.4 Small helpers (units ts-helpers, ts-entry, ts-glob)
 
@@ -2034,7 +2235,7 @@ export default function normalizePath(path: string, stripTrailing?: boolean): st
 // src/is-stream.ts  (is-stream 4.0.1 isStream, literal)
 export function isStream(stream: unknown, options?: { checkOpen?: boolean }): stream is NodeJS.ReadableStream | NodeJS.WritableStream;
 
-// src/lazystream.ts  (lazystream 1.0.1 Readable on node:stream PassThrough)
+// src/lazystream.ts  (lazystream 1.0.1 Readable on node:stream PassThrough; the whole file is pinned below)
 export class Readable extends PassThrough { constructor(fn: (options?: TransformOptions) => NodeJS.ReadableStream, options?: TransformOptions) }
 
 // src/readdir-glob.ts  (deps/readdir-glob/src/index.ts, copied statement by statement)
@@ -2047,7 +2248,47 @@ export default readdirGlob;
 mechanism of lazystream.js:15-36 (an own property `_read` that deletes itself, calls `fn`,
 forwards the source `'error'` with `this.emit.bind(this, 'error')`, pipes the source into
 `this`, then calls the prototype `_read` with the same arguments) and the synthetic
-`this.emit('readable')` at construction.
+`this.emit('readable')` at construction. The file, apart from its imports and upstream's
+own comment above `beforeFirstCall`:
+
+```ts
+// node-archiver/node_modules/lazystream/lib/lazystream.js:15
+function beforeFirstCall(instance: Readable, method: '_read', callback: (this: Readable, ...args: Parameters<Readable['_read']>) => void) {
+  instance[method] = function(this: Readable) {
+    delete (instance as { _read?: unknown })[method];
+    callback.apply(this, arguments as unknown as Parameters<Readable['_read']>);
+    return this[method].apply(this, arguments as unknown as Parameters<Readable['_read']>);
+  };
+}
+
+// node-archiver/node_modules/lazystream/lib/lazystream.js:23
+export class Readable extends PassThrough {
+  constructor(fn: (options?: TransformOptions) => NodeJS.ReadableStream, options?: TransformOptions) {
+    super({ ...options, autoDestroy: false, emitClose: false });   // PORTING.md V9
+
+    beforeFirstCall(this, '_read', function() {
+      var source = fn.call(this, options);
+      var emit = this.emit.bind(this, 'error');
+      source.on('error', emit);
+      source.pipe(this);
+    });
+
+    this.emit('readable');
+  }
+}
+```
+
+Three things differ from lazystream.js:23-37, and nothing else may:
+
+- `beforeFirstCall` keeps its `method` parameter and the computed accesses
+  `instance[method]`, `delete instance[method]` and `this[method]`; the parameter is typed
+  as the literal `'_read'`, and the two assertions are the ones of TS-41.
+- The base constructor gets `{ ...options, autoDestroy: false, emitClose: false }`, the
+  lifecycle of the readable-stream 2.3.8 `PassThrough` that upstream extends (V9, 11.12).
+  The two keys come after the spread, because v2 ignores them whatever the caller passes.
+  `fn` is still called with the caller's own `options`.
+- The guard `if (!(this instanceof Readable)) return new Readable(fn, options);`
+  (lazystream.js:24-25) is not ported (N5): an ES class cannot be called without `new`.
 
 ### 7.5 The zip engine: `src/compress-commons/*` (unit ts-zip-engine)
 
@@ -2341,11 +2582,18 @@ lib/plugins/zip.js literally plus `this.supports = { directory: true, symlink: t
 /** Throws exactly what Node throws for an invalid option bag, by constructing and closing
  *  the zlib object upstream would have constructed. No data is ever written to it. */
 export function validateZlibOptions(kind: 'deflateRaw' | 'gzip', options: unknown): void;
-//   'deflateRaw': new zlib.DeflateRaw(options).close()      'gzip': zlib.createGzip(options).close()
+//   'deflateRaw': zlib.createDeflateRaw(options as ZlibOptions).close()
+//   'gzip':       zlib.createGzip(options as ZlibOptions).close()
 /** options.level if it is a number and not NaN, else -1 (zlib default). */
-export function resolveLevel(options: unknown): number;
+export function resolveLevel(options: unknown): number {
+  const level = (options as { level?: unknown } | null | undefined)?.level;
+  return typeof level === 'number' && !Number.isNaN(level) ? level : -1;
+}
 /** options.strategy if it is a number and not NaN, else 0. */
-export function resolveStrategy(options: unknown): number;
+export function resolveStrategy(options: unknown): number {
+  const strategy = (options as { strategy?: unknown } | null | undefined)?.strategy;
+  return typeof strategy === 'number' && !Number.isNaN(strategy) ? strategy : 0;
+}
 /** gzip header OS byte of Node's zlib on this platform (R14). */
 export const GZIP_OS: number;   // process.platform === 'darwin' ? 19 : process.platform === 'win32' ? 10 : 3
 
@@ -2356,6 +2604,21 @@ export class Gzip extends Transform {            // node:stream; _transform -> W
 /** Replacement for zlib.createGzip(options) (lib/plugins/tar.js:28): validates, then builds a Gzip. */
 export function createGzip(options?: unknown): Gzip;
 ```
+
+`zlib.createDeflateRaw(options)` is `new zlib.DeflateRaw(options)` at run time, the
+constructor that upstream's `DeflateCRC32Stream` reaches through `super(options)`
+(deflate-crc32-stream.js:4-6), and throws the same errors. The `new` spelling does not
+type-check: `@types/node` 18.19 declares `DeflateRaw` and `Gzip` only as interfaces
+(zlib.d.ts:156-160). The file imports `* as zlib from 'node:zlib'` and the type
+`ZlibOptions`.
+
+`resolveLevel` and `resolveStrategy` are called with whatever the caller put into the
+option bag, including nothing: `createGzip(undefined)` is the default tar path, and
+`gzipOptions: null` survives the `typeof options.gzipOptions !== "object"` test of
+tar.js:22-24. `undefined`, `null` and a non-object all give the default, which is what Node
+does with them (`zlib.createGzip(null)` and `zlib.createGzip(5)` compress at the default
+level). These two functions have no upstream source, so the optional chaining is not a
+departure from TS-09.
 
 Where each validation happens: `validateZlibOptions('deflateRaw', this.options.zlib)` inside
 `_smartStream` for deflated entries (7.5); `createGzip(options.gzipOptions)` in the `Tar`
@@ -2591,7 +2854,7 @@ pub(crate) fn aes_write_local_file_header(&mut self, ae: &mut ZipArchiveEntry) {
     let mut extra = ae.get_extra().to_vec();
     extra.extend_from_slice(&_build_aes_extra_field(ae));
     ae.set_extra(extra);
-    ae.set_method(ZIP_AES_METHOD);
+    ae.set_method(ZIP_AES_METHOD as u16);
     ae.set_version_needed_to_extract(51);
     self.base_write_local_file_header(ae);
 }
@@ -2650,6 +2913,10 @@ if (ae.getMethod() === -1) { ae.setMethod(METHOD_DEFLATED); }  // zip-archive-ou
 pub fn get_time_dos(&self) -> u32 { self.time.unwrap_or(0) }
 if ae.get_method() == -1 { ae.set_method(METHOD_DEFLATED as u16); }
 ```
+The compression method is the one quantity with two types (10.1): `get_method()` returns
+`i32` so that `-1` exists, the method constants (`METHOD_STORED`, `METHOD_DEFLATED`,
+`ZIP_AES_METHOD`) are `i32` so that they compare with the getter without a cast, and
+`set_method` takes `u16`, so a constant is passed as `METHOD_DEFLATED as u16`.
 
 **RS-10 Many tiny `this.write(...)` calls.** One Rust line per upstream line.
 
@@ -2855,6 +3122,50 @@ self.write(&get_short_bytes((((ae.get_platform() as u16) << 8) | VERSION_MADEBY)
 ```
 `ae.get_platform() << 8` on the `u8` is a compile error (deny-by-default overflow lint).
 
+**RS-39 Ternaries inside a bitwise chain.** One parenthesized `if` / `else` per ternary, in
+upstream's order, on the type of the flag constants, with one cast at the end.
+
+```js
+return getShortBytes(                                            // general-purpose-bit.js:21-26
+  (this.descriptor ? DATA_DESCRIPTOR_FLAG : 0) |
+    (this.utf8 ? UFT8_NAMES_FLAG : 0) |
+    (this.encryption ? ENCRYPTION_FLAG : 0) |
+    (this.strongEncryption ? STRONG_ENCRYPTION_FLAG : 0),
+);
+```
+```rust
+get_short_bytes(
+    ((if self.descriptor { DATA_DESCRIPTOR_FLAG } else { 0 })
+        | (if self.utf8 { UFT8_NAMES_FLAG } else { 0 })
+        | (if self.encryption { ENCRYPTION_FLAG } else { 0 })
+        | (if self.strong_encryption { STRONG_ENCRYPTION_FLAG } else { 0 })) as u64,
+)
+```
+`cargo fmt` spreads an arm that exceeds its single-line width over five lines. That layout
+is accepted (12.3). Do not shorten the arms with locals, with `u16::from(b) * FLAG` or with
+a helper: the chain stays one expression. The file-private flag constants keep their
+upstream spelling and get the type of the chain: `const ENCRYPTION_FLAG: u16 = 1 << 0;`.
+
+**RS-40 A lint that fires on the upstream spelling.** The gate is
+`cargo clippy --workspace -- -D warnings` (section 16), and a mechanical port keeps
+spellings that clippy would write differently. The expression stays as upstream has it.
+
+- If the lint is in the `[workspace.lints.clippy]` list of 15.1, there is nothing to do.
+  The list holds `needless_range_loop`: a counting loop that indexes is ported as one
+  (`for (let i = 0; i < 148; i++) sum += block[i]`, headers.js:237, is
+  `for i in 0..148 { sum += block[i] as u32; }`).
+- If it is not, the lint is added to that list first, with the upstream line that needs it
+  (M8). It is not silenced with an item-level `#[allow(...)]`, and the expression is not
+  rewritten. The only item-level attributes are the ones this guide prints
+  (`#[allow(clippy::too_many_arguments)]` in 5.3).
+- No attribute is added on suspicion. A unit cannot run clippy before the crate compiles
+  (M1), so lints are settled in compile-fix stage (a) (2.1), by this rule. `1 << 0`
+  (general-purpose-bit.js:4) needs nothing: `clippy::identity_op` exempts exactly that
+  spelling, while `2 << 0` and `x | 0` would be reported.
+- `dead_code` and `unused` are never allowed (section 16 item 2). An upstream constant that
+  nothing reads is `pub` (6.5); a parameter that the body does not read gets a leading
+  underscore (section 6 rules); a private function that nothing calls is a porting error.
+
 ---
 
 ## 9. JavaScript to TypeScript pattern table
@@ -2880,7 +3191,9 @@ copied one to one. Never replace one with another, never `await`.
 
 **TS-04 Stream subclasses.** `class Archiver extends Transform` with `_transform(chunk,
 encoding, callback)`, `this._module.pipe(this)`, `this.end()` unchanged; the base class comes
-from `node:stream` (R1).
+from `node:stream` (R1). Where upstream's base is not a snapshot of the Node streams
+(lazystream on readable-stream 2), the constructor options of V9 are part of the port
+(11.12).
 
 **TS-05 Subclass constructors that assign base fields after `super()` and then call a base
 method** (index.js:8-17). Same shape. Fields are declared on `Archiver` only.
@@ -3054,8 +3367,10 @@ on() { return this.engine.on.apply(this.engine, arguments as unknown as Paramete
 // P9, Tar.unpipe without a compressor: streamx's Readable type has no `unpipe`; the call must still be made and throw
 return (this.engine as unknown as { unpipe: (...a: unknown[]) => unknown }).unpipe.apply(this.engine, arguments as unknown as unknown[]);
 
-// TS-24, lazystream (lazystream.js:16-17): deleting an own property that shadows a required method
-delete (instance as { _read?: unknown })._read;
+// TS-24, lazystream (lazystream.js:16-19): deleting an own property that shadows a required method, and
+// `arguments` at an apply; upstream's computed access stays, `method` is typed as the literal '_read' (7.4)
+delete (instance as { _read?: unknown })[method];
+callback.apply(this, arguments as unknown as Parameters<Readable['_read']>);
 
 // the `false` sentinel of Archiver._module (core.js:40): every call site, no `if (this._module)`
 (this._module as ArchiverModule).append(source, data, ...);
@@ -3063,16 +3378,66 @@ delete (instance as { _read?: unknown })._read;
 
 // values coming out of nodeRequire (15.3)
 export const wasm = nodeRequire('../pkg/ykk_wasm.cjs') as YkkWasm;
+
+// a bag typed `unknown` that is handed to a Node API (7.7)
+zlib.createDeflateRaw(options as ZlibOptions).close();
+
+// one property read from a value typed `unknown` (7.7; the assertion names only that property)
+const level = (options as { level?: unknown } | null | undefined)?.level;
+
+// a parameter typed `unknown` that upstream reassigns and returns (utils.js:29-41, zip-stream/utils.js:3-15)
+return dateish as Date;
+
+// isStream() narrows to ReadableStream | WritableStream, and a WritableStream has no `pipe`
+// (utils.js:52; compress-commons util/index.js:12 is the same with `source.pipe(normalized)`)
+return (source as NodeJS.ReadableStream).pipe(new PassThrough());
+
+// duck typing on `unknown` (is-stream/index.js:1-6): one module-level type, asserted at every property read
+type StreamLike = { writable?: boolean; readable?: boolean; pipe?: unknown };
+(stream as StreamLike).writable
+
+// a property that the narrowed type does not declare (compress-commons util/index.js:10): the same shape
+(source as { _readableState?: unknown })._readableState
+
+// Array.prototype.shift() under a length test (queue.js:225)
+var node = _tasks.shift() as { data: T };
+
+// an object literal that Object.defineProperties completes afterwards (queue.js:161-291, TS-42)
+var q = { concurrency, push(data) { ... }, ... } as QueueObject<T>;
 ```
 
-A dynamic pattern that needs an assertion and is not listed here gets a row here first (M8).
+Every spelling above compiles under the pinned `typescript` and `@types/node`; the ones of
+7.3, 7.4 and 7.7 are in the written files. A dynamic pattern that needs an assertion and is
+not listed here gets a row here first (M8). The row keeps the upstream expression and
+names the narrowest type that makes it compile.
+
+**TS-42 `Object.defineProperties` and `Object.defineProperty`.** Ported as the same call
+with the same descriptor, after the same object literal. Folding the property into the
+literal makes it writable, enumerable and configurable, which upstream's is not.
+
+```js
+Object.defineProperties(q, {                                     // async/internal/queue.js:270-291
+    drain: { writable: false, value: eventMethod('drain') },
+    ...
+});
+```
+```ts
+Object.defineProperties(q, {
+    drain: {
+        writable: false,
+        value: (handler: () => void) => { drainHandlers = []; drainHandlers.push(handler); }
+    }
+});
+```
+The literal that the call completes is asserted to the finished type (TS-41).
 
 Coverage of the inventory pattern lists: core 1-19 are TS-01..19 and TS-25; zip 1-19 are
 RS-02..15, RS-18, RS-19, RS-26, RS-27, RS-32, TS-08, TS-36, TS-39; tar-json 1-19 are RS-20..26,
 TS-01, TS-27..32, section 13; encrypted 1-17 are RS-02, RS-11, RS-14, RS-16, RS-28..31, RS-33,
 TS-33..36; glob-fs 1-23 are TS-02, TS-03, TS-06..09, TS-13..26; tests 1-16 are RS-17, TS-01,
 TS-33, TS-35, TS-37, TS-40 and the rows above. RS-37, RS-38 and TS-41 were added by the
-review of this guide and have no inventory source.
+review of this guide and have no inventory source; RS-39, RS-40 and TS-42 were added after
+the trial run (2.3).
 
 ---
 
@@ -3090,27 +3455,36 @@ review of this guide and have no inventory source.
 | tar size | double | `f64` (ported arithmetic is on doubles) | `f64` | `number` |
 | tar mtime | `Date` | `f64` milliseconds | `f64` | `Date` |
 | ZipCrypto keys | int32 with `Math.imul`, `>>>` | `u32` | not exposed | not exposed |
-| general purpose flags, versions, methods | small ints | `u16` | `u16` / `i32` | `number` |
+| general purpose flag word, version needed, version made by, internal attributes | small ints | `u16` | `u16` | `number` |
+| compression method | small int, `-1` when unset | field `Option<u16>`; `get_method()` returns `i32` (`-1` for `None`); the constants `METHOD_STORED`, `METHOD_DEFLATED` and `ZIP_AES_METHOD` are `i32`, like the getter; `set_method` takes `u16`, so a constant is passed as `METHOD_DEFLATED as u16` (RS-09) | `i32` (`-1` when unset) | `number` |
+| platform | small int | `u8` | `u8` | `number` |
+| argument of `getShortBytes`, `getLongBytes`, `getEightBytes` | any number | `u64`, whatever the type at the call site: widen with `as u64` (the `i32` method as `method as u16 as u64`, RS-10; a narrow field after the arithmetic, RS-38); the function truncates | not exposed | not exposed |
 | zlib level | number | `i32` | `i32` | `number` |
 
 ### 10.2 Coercion idioms
 
-| JS | Meaning | Rust |
-|---|---|---|
-| `x >>> 0` where `x` is an int32 result | reinterpret as unsigned | `x as u32` (from `i32`) |
-| `crc32.buf(b) >>> 0` | unsigned CRC | `crc32::buf(b, 0)` (already `u32`) |
-| `n \| 0` where `n` is a double | ECMAScript ToInt32 | `numeric::to_int32(n)`; never `n as i32` (saturates, 11.5) |
-| `(v & 0xffff) >>> 0` | low 16 bits | `v as u16` |
-| `(v & 0xffffffff) >>> 0` | low 32 bits | `v as u32` |
-| `v % 0x0100000000`, `(v / 0x0100000000) \| 0` | low and high words | `v as u32`, `(v >> 32) as u32`, or `u64::to_le_bytes` |
-| `a << n` (int32) | shift, bits fall off the top | `a << n` on `i32` (Rust only panics on a shift amount >= 32; all amounts here are constants) |
-| `a >>> n` | logical shift | `(a as u32) >> n` |
-| `a >> n` (int32) | arithmetic shift | `a >> n` on `i32` |
-| `~c` | bitwise not | `!c` |
-| `Math.imul(a, b)` | 32-bit wrapping product | `a.wrapping_mul(b)` on `u32` |
-| `_uint32(a + b)` | 32-bit wrapping sum | `a.wrapping_add(b)` |
-| `size &= 511` | low 9 bits after ToInt32 | `to_int32(size) & 511` |
-| `Math.floor(num / 0x100)` on a non-negative double | floor | `(num / 256.0).floor()` |
+| JS | Meaning | Rust | Domain in which both sides agree |
+|---|---|---|---|
+| `x >>> 0` where `x` is an int32 result | reinterpret as unsigned | `x as u32` (from `i32`) | every int32 |
+| `crc32.buf(b) >>> 0` | unsigned CRC | `crc32::buf(b, 0)` (already `u32`) | every input |
+| `n \| 0` where `n` is a double | ECMAScript ToInt32 | `numeric::to_int32(n)`; never `n as i32` (saturates, 11.5) | every double, NaN and the infinities included |
+| `(v & 0xffff) >>> 0`, then `writeUInt16LE` | low 16 bits | `v as u16` | every integer the port holds; the mask keeps the write in range, nothing throws |
+| `(v & 0xffffffff) >>> 0`, then `writeUInt32LE` | low 32 bits | `v as u32` | as above |
+| `v % 0x0100000000`, `(v / 0x0100000000) \| 0`, each into `writeUInt32LE` | low and high words | `v as u32`, `(v >> 32) as u32`, or `u64::to_le_bytes` | `0 <= v < 2^53`, the range in which a JS number is an exact size or offset (10.1). From `2^63` upstream throws `ERR_OUT_OF_RANGE` (the `\| 0` turns the high word negative) where Rust writes the bytes; no ykk path produces such a value and the throw is not ported |
+| `a << n` (int32) | shift, bits fall off the top | `a << n` on `i32` (Rust only panics on a shift amount >= 32; all amounts here are constants) | every int32, constant `n` below 32 |
+| `a >>> n` | logical shift | `(a as u32) >> n` | as above |
+| `a >> n` (int32) | arithmetic shift | `a >> n` on `i32` | as above |
+| `~c` | bitwise not | `!c` | every int32 |
+| `Math.imul(a, b)` | 32-bit wrapping product | `a.wrapping_mul(b)` on `u32` | every pair |
+| `_uint32(a + b)` | 32-bit wrapping sum | `a.wrapping_add(b)` | every pair of uint32 |
+| `size &= 511` | low 9 bits after ToInt32 | `to_int32(size) & 511` | every double |
+| `Math.floor(num / 0x100)` on a non-negative double | floor | `(num / 256.0).floor()` | every non-negative finite double |
+
+The last column is the contract. Where a JS idiom ends in a Buffer write, the write checks
+its range and throws; the Rust side has no such check. Inside the domain the bytes are
+equal. Outside it the port neither reproduces the throw nor adds an error (V13), and a
+reviewer does not report the missing throw (2.3, K5). A row that is added to this table
+states its domain.
 
 Every addition, multiplication or subtraction that can leave the range of its type is
 written with an explicit `wrapping_*` call. Native tests run with overflow checks on, the
@@ -3376,6 +3750,57 @@ at that moment; the three hooks of 7.5 therefore read nothing from `this` except
 (read per entry, long after construction). `_encryptionMethod()` is the only hook called
 from the base constructor and returns a literal.
 
+### 11.11 A loop around a codec that has buffers of its own
+
+`compress_vec(input, out, flush)` reads like "give input, get output". It is zlib's C
+interface: every call reports how much input it took and how much output it wrote, and
+either can be less than everything.
+
+- "All input consumed" is not "done". The codec returns as soon as the output space is
+  used up, and it may have taken the last input byte in that same call while it still
+  holds compressed bytes. The continue condition is "the call filled the output buffer",
+  which is Node's `availOutAfter === 0`.
+- "Nothing happened" is not an `Err`. The rust backend of flate2 answers a call that could
+  do nothing (an empty input without a flush, any write after the stream has ended) with
+  `Ok(Status::BufError)`. A loop that ends only on `Err` or on consumed input then spins
+  forever, inside wasm, where nothing can interrupt it.
+
+```rust
+// WRONG: leaves output inside the compressor, and never returns for a write after the end
+while !input.is_empty() {
+    let before = compress.total_in();
+    compress.compress_vec(input, out, flush).map_err(|e| DeflateError(e.to_string()))?;
+    input = &input[(compress.total_in() - before) as usize..];
+}
+```
+
+The crate has one such loop, `crc32_stream::deflate`, and its three outcomes are pinned in
+6.4. No other function under `src/` calls a method of `flate2::Compress`; a unit that
+needs deflate goes through `DeflateCRC32Stream` or `deflate`. Tests inflate with
+`flate2::read::DeflateDecoder`, which brings its own loop. Any other loop whose progress
+depends on a library call gets the same two things pinned before it is written: the
+continue condition and the no-progress exit with its error text.
+
+### 11.12 The same base class name from another stream implementation
+
+`extends PassThrough` reads the same whether `PassThrough` comes from readable-stream 2,
+from readable-stream 4 or from `node:stream`. The behavior a subclass inherits does not:
+
+| | readable-stream 2.3.8 | readable-stream 4, `node:stream`, the zlib classes |
+|---|---|---|
+| after `'end'` and `'finish'` | not destroyed, no `'close'` | destroyed (`autoDestroy`), `'close'` emitted (`emitClose`) |
+| `'error'` emitted on a pipe destination that has no other `'error'` listener | emitted again at once, so it throws out of the emitting call | the destination is destroyed and the error is emitted later; with `autoDestroy: false` it is emitted again at once |
+| `_read` throws | the exception leaves `read()` | caught and turned into an `'error'` event |
+| order on a `PassThrough` that ran to its end | `'finish'`, then `'end'` | `'end'`, then `'finish'` |
+
+V9 records what the port does about each class whose base changed. Only
+`lazystream.Readable` has a v2 base: its constructor options restore the first two rows,
+and the last two are listed in V9 as remaining differences. The classes that stood on
+readable-stream 4 or on a zlib class (`Archiver`, `Json`, `ArchiveOutputStream`, the
+`PassThrough` of `normalizeInputSource`, `SmartStream`, `Gzip`) have the Node defaults on
+both sides and pass no lifecycle options. A unit that finds a base class missing from this
+list has it added to V9 first, with both sides observed by running them (2.3, rule 5).
+
 ---
 
 ## 12. Dependency policy
@@ -3569,7 +3994,15 @@ inside `SmartStream` and propagates as a synchronous exception from every other 
 |---|---|---|
 | `zip20 entry too large` | `writeData` / `endData` of a ZipCrypto entry (V16) | entry callback, then archiver `'error'` |
 | `deflate error: <text>` | `writeData` / `endData` | entry callback, then archiver `'error'` |
+| `deflate error: <text>` | `WasmGzip.write` / `WasmGzip.finish` | synchronous throw out of `Gzip._transform` / `Gzip._flush` (7.7) |
 | any other `ZipError`, or a trap | `entry`, `completeStored`, `finish` and the other classes | synchronous throw out of the calling method |
+
+`<text>` is one of the two texts of the deflate loop (6.2, 6.4). `deflate compression error`
+is flate2 reporting a failure of its own; it is the text that would depend on the data,
+and no input is known to cause it. `no progress` is a call that consumed no input and
+produced no output; it needs a write after the stream was finished, which the TypeScript
+shells never make (a Node stream does not call `_transform` after `_flush`). Both are
+pinned so that the loop always ends and a failure, should one happen, is reported.
 
 ---
 
@@ -3814,7 +4247,12 @@ mandatory vectors; the test name is binding, because
 Compressed sizes are never asserted as constants: only `csize == payload length`,
 `+ 12` (ZipCrypto) or `+ 28` (AES), because the length of a deflate stream is a property
 of miniz_oxide, not of the container (V1; zlib itself emits 2 bytes for an empty stream at
-levels 1 to 9 and 5 bytes at level 0).
+levels 1 to 9 and 5 bytes at level 0). An expected value that a unit adds beyond this table
+comes from upstream, by running the upstream function (or Node's zlib, for the gzip
+header) under node; it is never obtained by running the port. A function with a parameter
+that selects a branch is tested with every value of it (K4). The generated tables under
+`crates/ykk-core/tests/golden/` belong to tests-golden and are asserted by `golden.rs`
+only; a `#[cfg(test)]` module carries its own rows and does not include them.
 
 | File | Test name | Vector |
 |---|---|---|
@@ -3827,9 +4265,12 @@ levels 1 to 9 and 5 bytes at level 0).
 | `json.rs` | `append_slices` | `append` over two slices equals `append` over the whole buffer; sizes add up |
 | `crc32_stream.rs` | `deflate_counts_and_roundtrip` | `compressed_size` equals the bytes appended to `out` including the final flush; inflating them returns the input; an empty input still gives a non-empty stream |
 | `crc32_stream.rs` | `zlib_level_mapping` | -1 gives 6, -5 gives 6, 10 gives 9 |
+| `crc32_stream.rs` | `deflate_loop_exits` | the out-of-order table of 6.4 for `DeflateCRC32Stream`: after `_flush`, a non-empty `_transform` returns `Err(DeflateError("no progress"))` and appends nothing, an empty one returns `Ok` and appends nothing, a second `_flush` returns `Ok` and appends nothing; one `_transform` whose output is larger than the 32 KiB reserve, followed by `_flush`, inflates to the input |
 | `gzip.rs` | `header_and_trailer` | header `1f 8b 08 00 00 00 00 00 XFL OS` with XFL 2 for level 9, 4 for level 1, 0 for level 6, 4 for strategy 2; trailer CRC and length; an empty input is a full member |
+| `gzip.rs` | `calls_after_finish` | the out-of-order table of 6.4 for `Gzip`: a non-empty `write` after `finish` returns `Err(DeflateError("no progress"))`, an empty one returns `Ok` and appends nothing, a second `finish` appends exactly the 8 trailer bytes again |
 | `zip/util.rs` | `date_to_dos_vectors` | 2013-01-03T14:26:38Z gives bytes `53 73 23 42`; year 1979 gives 2162688; year 2044 gives 2141175677; all-NaN fields give 0 |
 | `zip/utils.rs` | `sanitize_not_idempotent` | `'c:c:/x'` gives `'c:/x'`, which gives `'x'` |
+| `zip/utils.rs` | `normalize_path_vectors` | both values of `strip_trailing` (K4), each row as `false`, then `true`: `'a\\b//c/'` gives `'a/b/c/'` and `'a/b/c'`; `'//'` gives `'/'` and `''`; `'\\?\'` gives `'/?/'` and `'/?'`; `'\\?\C:\foo'` gives `'//?/C:/foo'` for both |
 | `zip/general_purpose_bit.rs` | `encode_bits` | descriptor `08 00`, UTF-8 `00 08`, encryption `01 00`, and their combinations |
 | `zip/zip_archive_entry.rs` | `unix_mode_exattr` | the four values of 10.3 |
 | `zip/zip_stream.rs` | `entry_replay_order` | the statement order of 6.10 (name with prepended slash, store, comment, mode) on one entry |
@@ -4011,6 +4452,7 @@ resolver = "2"
 [workspace.lints.clippy]
 debug_assert_with_mut_call = "deny"
 new_without_default = "allow"      # the pinned argument-less `new()` of CRC32Stream, GeneralPurposeBit, Pack, WasmPack mirror upstream constructors; no Default impls are added
+needless_range_loop = "allow"      # upstream's counting loops that index are ported as counting loops (deps/tar-stream/headers.js:237-238); RS-40
 
 [profile.release]
 opt-level = 3
@@ -4019,7 +4461,11 @@ codegen-units = 1
 panic = "abort"
 ```
 
-Both crate manifests add `[lints] workspace = true`.
+Both crate manifests add `[lints] workspace = true`. The `allow` entries are the complete
+list of clippy lints that the port silences, and each names the upstream spelling that
+needs it. A lint that fires on another upstream spelling is added here, in the same form,
+before any file is changed (RS-40); no file carries an `#[allow(...)]` of its own beyond
+the attributes this guide prints.
 
 ### 15.2 Building the wasm (`scripts/build-wasm.sh`, scaffold unit)
 
@@ -4436,8 +4882,9 @@ at the pinned version from its release archive, verified against a recorded SHA-
 
 `.github/workflows/release.yml` (scaffold unit): on a pushed tag `v<version>`; fails unless
 the tag equals the `version` of `package.json`; same setup as CI on `ubuntu-latest` with
-Node 22; `npm ci`; `npm publish` (which runs `prepublishOnly` and `prepack`), authenticated
-with the repository secret `NPM_TOKEN`; then `npm view @thilllon/ykk@<version> version`
+Node 22; `npm ci`; `npm run prepublishOnly` in a step that has no credentials; then
+`npm publish --ignore-scripts` in its own step, the only one that receives the repository
+secret `NPM_TOKEN` (build and test code never sees the token); then `npm view @thilllon/ykk@<version> version`
 must print the version, and a fresh `npm install @thilllon/ykk@<version>` in an empty
 project must pass the smoke checks of section 16 item 4
 (`node scripts/check-tarball.mjs --spec @thilllon/ykk@<version>`). The secret is the one thing the
