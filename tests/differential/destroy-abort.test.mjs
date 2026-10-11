@@ -492,33 +492,37 @@ describe('differential: destroyed engines, comments and names out of contract, V
       }
     }
 
-    it(`zip, stored: a name of exactly ${MAX_TEXT} bytes is written as upstream writes it`, async function () {
-      const runs = await inChild('hugeText', { kind: 'zip, stored', field: 'name', size: MAX_TEXT, settle: 0 }, { wait: 'none' });
-      assertNoCrash(runs);
-      assert.equal(runs.upstream.result.value.outcome, 'finalized');
-      assert.equal(runs.upstream.result.value.length, 2 * MAX_TEXT + 30 + 2 + 46 + 22);
-      assert.deepStrictEqual(runs.ykk.result.value, runs.upstream.result.value);
-      assert.deepStrictEqual(eventNames(runs.ykk.result), eventNames(runs.upstream.result));
-    });
+    // PORTING.md 14.2 (R4): 64 MiB of text takes minutes on Node 18 and 20, so these cases are
+    // registered only by destroy-abort-huge.slow.mjs.
+    if (process.env.YKK_SLOW === '1') {
+      it(`zip, stored: a name of exactly ${MAX_TEXT} bytes is written as upstream writes it`, async function () {
+        const runs = await inChild('hugeText', { kind: 'zip, stored', field: 'name', size: MAX_TEXT, settle: 0 }, { wait: 'none' });
+        assertNoCrash(runs);
+        assert.equal(runs.upstream.result.value.outcome, 'finalized');
+        assert.equal(runs.upstream.result.value.length, 2 * MAX_TEXT + 30 + 2 + 46 + 22);
+        assert.deepStrictEqual(runs.ykk.result.value, runs.upstream.result.value);
+        assert.deepStrictEqual(eventNames(runs.ykk.result), eventNames(runs.upstream.result));
+      });
 
-    for (const kind of ['zip, stored', 'aes256', 'zip20']) {
-      for (const field of ['name', 'comment']) {
-        it(`${kind}: a ${field} of ${MAX_TEXT + 1} bytes is an 'error' in ykk, never a wasm trap; upstream writes it`, async function () {
-          const runs = await inChild('hugeText', { kind, field, size: MAX_TEXT + 1, settle: SETTLE_MS }, { wait: 'none' });
-          assertNoCrash(runs);
-          const { upstream, ykk } = runs;
-          assert.equal(upstream.result.value.outcome, 'finalized');
-          assert.deepStrictEqual(selectEvents(upstream.result.events, ['error', 'warning']), []);
-          assert.ok(upstream.result.value.length > (field === 'name' ? 2 : 1) * MAX_TEXT);
+      for (const kind of ['zip, stored', 'aes256', 'zip20']) {
+        for (const field of ['name', 'comment']) {
+          it(`${kind}: a ${field} of ${MAX_TEXT + 1} bytes is an 'error' in ykk, never a wasm trap; upstream writes it`, async function () {
+            const runs = await inChild('hugeText', { kind, field, size: MAX_TEXT + 1, settle: SETTLE_MS }, { wait: 'none' });
+            assertNoCrash(runs);
+            const { upstream, ykk } = runs;
+            assert.equal(upstream.result.value.outcome, 'finalized');
+            assert.deepStrictEqual(selectEvents(upstream.result.events, ['error', 'warning']), []);
+            assert.ok(upstream.result.value.length > (field === 'name' ? 2 : 1) * MAX_TEXT);
 
-          assert.equal(ykk.result.value.outcome, 'error');
-          assert.equal(ykk.result.value.length, 0);
-          assert.deepStrictEqual(errorsOf(ykk.result), [
-            { name: 'Error', code: undefined, message: `entry ${field} too large`, data: undefined },
-          ]);
-          assert.deepStrictEqual(selectEvents(ykk.result.events, ['entry']), []);
-          assert.deepStrictEqual(ykk.result.settled, []);
-        });
+            assert.equal(ykk.result.value.outcome, 'error');
+            assert.equal(ykk.result.value.length, 0);
+            assert.deepStrictEqual(errorsOf(ykk.result), [
+              { name: 'Error', code: undefined, message: `entry ${field} too large`, data: undefined },
+            ]);
+            assert.deepStrictEqual(selectEvents(ykk.result.events, ['entry']), []);
+            assert.deepStrictEqual(ykk.result.settled, []);
+          });
+        }
       }
     }
   });
