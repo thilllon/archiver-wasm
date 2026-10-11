@@ -10,7 +10,7 @@ import path from 'node:path';
 import { Writable } from 'node:stream';
 import { finished } from 'node:stream/promises';
 import zlib from 'node:zlib';
-import { decryptAes } from './helpers/decrypt.mjs';
+import { decryptAes, decryptZip20 } from './helpers/decrypt.mjs';
 import { omitV15Keys, selectEvents } from './helpers/events.mjs';
 import { runBoth } from './helpers/run-both.mjs';
 import { maskCentral, maskDescriptor, maskEndRecords, maskLocal, parseZip } from './helpers/zip-records.mjs';
@@ -28,7 +28,7 @@ const STREAMED_SIZE = 4 * GIB + 4096;
 const BUFFER_SIZE = 0x60000000;
 // S3: the smallest length above 0xFFFFFFFF, which is also buffer.constants.MAX_LENGTH of Node 18 and 20
 const HUGE_BUFFER_SIZE = 4 * GIB;
-// S4: above the 2 GiB a wasm vector can hold (V16)
+// S4: above the 2 GiB a wasm vector can hold, which the entry had to fit in while it was buffered in wasm (V16)
 const ZIP20_SIZE = 2 * GIB + 0x100000;
 
 // PORTING.md 17.2: salt (16), password verifier (2), MAC (10); the 12 ZipCrypto header bytes
@@ -489,58 +489,82 @@ describe('differential (slow): large zip entries', function () {
     }
   });
 
-  describe('S4 a ZipCrypto entry too large for wasm memory (V16)', function () {
+  describe('S4 a ZipCrypto entry above 1 GiB (V16)', function () {
     let sparse;
+    const add = (archive) => {
+      archive.append(fs.createReadStream(sparse), { name: NAME, date: DATE });
+    };
 
     before(function () {
       sparse = sparseFile('above-2gib.bin', ZIP20_SIZE);
     });
 
-    it('ykk reports "zip20 entry too large", upstream completes', async function () {
+    it('zip20, stored', async function () {
       const { upstream, ykk } = await runBoth(
-        async (impl, ctx) => {
-          const archive = ctx.create('zip20', { password: PASSWORD, store: true }, { data: false });
-          const sink = digestSink();
-          archive.pipe(sink);
-          const source = fs.createReadStream(sparse);
-          const failed = once(archive, 'error').then(([err]) => err);
-          archive.append(source, { name: NAME, date: DATE });
-          const err = await Promise.race([
-            archive.finalize().then(
-              () => null,
-              (reason) => reason
-            ),
-            failed,
-          ]);
-          if (err !== null) {
-            // the 'error' unpiped the engine from the archive: finalize() would never settle
-            source.destroy();
-            archive.destroy();
-            return { failed: err.message };
-          }
-          await finished(sink);
-          return { failed: null, ...sink.summary() };
-        },
+        digested('zip20', () => ({ password: PASSWORD, store: true }), add),
         { random: ZIP20_HEADER }
       );
+      assertSameDigest(upstream, ykk);
+      assert.deepStrictEqual(selectEvents(ykk.events, ['error', 'warning']), []);
+      assert.equal(selectEvents(ykk.events, ['entry']).length, 1);
+      for (const run of [upstream, ykk]) {
+        const local = readLocal(run.value);
+        const end = readEnd(run.value);
+        assert.equal(run.value.length, local.length + ZIP20_OVERHEAD + ZIP20_SIZE + end.centralSize + 22);
+        // the entry is buffered until it ends (V16 (c)), so the local header has the sizes and no descriptor follows
+        assert.equal(local.flags, 0x0001);
+        assert.equal(local.method, 0);
+        assert.equal(local.size, ZIP20_SIZE);
+        assert.equal(local.compressedSize, ZIP20_SIZE + ZIP20_OVERHEAD);
+        assert.notEqual(local.crc, 0);
+        assert.equal(end.central.crc, local.crc);
+        assert.equal(end.central.flags, 0x0001);
+        assert.equal(end.central.size, ZIP20_SIZE);
+        assert.equal(end.central.compressedSize, ZIP20_SIZE + ZIP20_OVERHEAD);
+        assert.equal(end.central.localHeaderOffset, 0);
+        assert.equal(end.zip64, false);
+        assert.equal(end.entries, 1);
+        assert.equal(end.centralOffset, local.length + ZIP20_OVERHEAD + ZIP20_SIZE);
+      }
+    });
 
-      assert.equal(upstream.error, null);
-      assert.equal(upstream.value.failed, null);
-      assert.deepStrictEqual(selectEvents(upstream.events, ['error', 'warning']), []);
-      const local = readLocal(upstream.value);
-      const end = readEnd(upstream.value);
-      assert.equal(upstream.value.length, local.length + ZIP20_OVERHEAD + ZIP20_SIZE + end.centralSize + 22);
-      assert.equal(local.flags, 0x0001);
-      assert.equal(local.size, ZIP20_SIZE);
-      assert.equal(local.compressedSize, ZIP20_SIZE + ZIP20_OVERHEAD);
-
+    it('zip20, deflated', async function () {
+      const { upstream, ykk } = await runBoth(collected('zip20', () => ({ password: PASSWORD }), add), {
+        random: ZIP20_HEADER,
+      });
+      assert.deepStrictEqual(ykk.error, upstream.error);
       assert.equal(ykk.error, null);
-      assert.equal(ykk.value.failed, 'zip20 entry too large');
-      const errors = selectEvents(ykk.events, ['error']);
-      assert.equal(errors.length, 1);
-      assert.equal(errors[0].payload.name, 'Error');
-      assert.equal(errors[0].payload.message, 'zip20 entry too large');
-      assert.deepStrictEqual(selectEvents(ykk.events, ['entry']), []);
+      const u = parseZip(upstream.bytes);
+      const y = parseZip(ykk.bytes);
+      const digests = [];
+      for (const parsed of [u, y]) {
+        assert.deepStrictEqual(parsed.entries.map((entry) => entry.name), [NAME]);
+        const entry = parsed.entries[0];
+        assert.equal(entry.local.flags, 0x0001);
+        assert.equal(entry.local.method, 8);
+        assert.equal(entry.local.size, ZIP20_SIZE);
+        assert.equal(entry.local.compressedSize, entry.payload.length);
+        assert.equal(entry.descriptor, null);
+        assert.equal(entry.central.size, ZIP20_SIZE);
+        assert.equal(entry.central.compressedSize, entry.payload.length);
+        assert.equal(entry.central.crc, entry.local.crc);
+        const decrypted = await decryptZip20(entry.payload, PASSWORD);
+        assert.equal(entry.payload.length, decrypted.data.length + ZIP20_OVERHEAD);
+        // bytes 10 and 11 of the header are the CRC check bytes (V10)
+        assert.deepStrictEqual(decrypted.header.subarray(0, 10), ZIP20_HEADER.subarray(0, 10));
+        assert.equal(decrypted.header.readUInt16LE(10), entry.central.crc >>> 16);
+        digests.push(await inflatedDigest(decrypted.data));
+        assertEndRecords(parsed);
+        assert.equal(parsed.zip64End, null);
+      }
+      assert.equal(digests[0].length, ZIP20_SIZE);
+      assert.deepStrictEqual(digests[1], digests[0]);
+      assert.equal(y.entries[0].central.crc, u.entries[0].central.crc);
+      assert.deepStrictEqual(maskLocal(y.entries[0].local), maskLocal(u.entries[0].local));
+      assert.deepStrictEqual(maskCentral(y.entries[0].central), maskCentral(u.entries[0].central));
+      assert.deepStrictEqual(maskEndRecords(y), maskEndRecords(u));
+      assert.deepStrictEqual(comparedEvents(ykk), comparedEvents(upstream));
+      assert.deepStrictEqual(selectEvents(ykk.events, ['error', 'warning']), []);
     });
   });
 

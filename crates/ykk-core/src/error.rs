@@ -14,8 +14,7 @@ pub enum ZipError {
     InvalidRandomLength { expected: usize, actual: usize }, // "expected {expected} random bytes, got {actual}"  ykk
     InvalidKeyLength { expected: usize, actual: usize }, // "expected a {expected} byte key, got {actual}"  ykk
     InvalidEncryption(u8),                               // "unknown encryption method {0}"  ykk
-    EntryTooLarge, // "zip20 entry too large"  ykk (V16: a try_reserve for the buffered ZipCrypto entry failed)
-    Deflate(String), // "deflate error: {0}"  ykk
+    Deflate(String),                                     // "deflate error: {0}"  ykk
 }
 
 impl fmt::Display for DeflateError {
@@ -44,7 +43,6 @@ impl fmt::Display for ZipError {
                 write!(f, "expected a {expected} byte key, got {actual}")
             }
             ZipError::InvalidEncryption(method) => write!(f, "unknown encryption method {method}"),
-            ZipError::EntryTooLarge => f.write_str("zip20 entry too large"),
             ZipError::Deflate(text) => write!(f, "deflate error: {text}"),
         }
     }
@@ -113,7 +111,6 @@ mod tests {
             ZipError::InvalidEncryption(3).to_string(),
             "unknown encryption method 3"
         );
-        assert_eq!(ZipError::EntryTooLarge.to_string(), "zip20 entry too large");
         assert_eq!(
             ZipError::Deflate("x".to_string()).to_string(),
             "deflate error: x"

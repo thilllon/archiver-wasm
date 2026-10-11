@@ -55,6 +55,8 @@ const archive = archiver.create("zip-encrypted", {
 
 CommonJS works the same way: `const { ZipArchive } = require("@thilllon/ykk")`.
 
+`import` and `require` share one implementation. A format registered through one is visible through the other.
+
 ## Compatibility with upstream
 
 The port follows upstream statement by statement, so behavior matches archiver 8.0.0 and archiver-zip-encrypted 2.0.0.

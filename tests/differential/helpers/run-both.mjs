@@ -107,10 +107,11 @@ async function loadUpstream() {
   };
 }
 
-// the built package: the ESM build for the archiver 8 surface, the CommonJS entry for the archiver 7
-// surface, as the two upstream suites use them (PORTING.md 14.1)
+// the published package: the ESM entry for the archiver 8 surface, the CommonJS entry for the archiver 7
+// surface, as the two upstream suites use them (PORTING.md 14.1). esm/index.mjs re-exports
+// cjs/index.cjs (15.4), so both surfaces are one instance.
 async function loadYkk() {
-  const ns = await import(pathToFileURL(path.join(ROOT, 'dist/index.mjs')).href);
+  const ns = await import(pathToFileURL(path.join(ROOT, 'esm/index.mjs')).href);
   const archiver = require(path.join(ROOT, 'cjs/index.cjs'));
   if (!archiver.isRegisteredFormat('zip-encrypted')) {
     archiver.registerFormat('zip-encrypted', archiver.ZipEncrypted);

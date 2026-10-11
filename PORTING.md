@@ -372,22 +372,22 @@ number.
 
 | # | Deviation | Why |
 |---|---|---|
-| V1 | Deflate and gzip compressed payload bytes differ from zlib; `csize`, offsets and descriptors follow the actual compressed length. | Allowed by the project rules; miniz_oxide is not zlib. |
+| V1 | Deflate and gzip compressed payload bytes differ from zlib; `csize`, offsets and descriptors follow the actual compressed length. The compressed size differs too. At zlib level 1, which is the zip default (zip-archive-output-stream.js:113-114), miniz_oxide output is larger than zlib's: measured archives of one deflated entry were 9 to 19 percent larger than upstream's (15.4 MB of JavaScript source: 3499632 bytes upstream, 4127264 bytes ykk). At levels 2, 6 and 9 the sizes were within about 1 percent of zlib's or smaller. Level 1 is passed to miniz_oxide as 1 (`zlib_level`, 6.4) and is not remapped to 2: the gzip header XFL byte is derived from the same value (`Gzip::new`). | Allowed by the project rules; miniz_oxide is not zlib. Its level 1 is one probe with greedy parsing, a faster and weaker mode than zlib's `deflate_fast`. Every output inflates to the input. |
 | V2 | zlib options other than `level` (and `strategy` for the gzip header XFL byte) are validated (R15) but have no effect: `memLevel`, `windowBits`, `chunkSize`, `dictionary`, `flush`, `finishFlush`, `maxOutputLength`, `info`. | miniz_oxide has no equivalent; they only influence the payload. |
-| V3 | Completion callbacks that upstream fires from zlib thread-pool completion fire from stream events of the per-entry `SmartStream` instead. They are still asynchronous. The ZipCrypto promise chain (zip-crypto-stream.js:69-73, 119-138) is not reproduced; the buffered chunks are encrypted in one synchronous loop. | No thread pool in wasm. For zip a deflated buffer entry completes in the turn its queue worker started, at least one turn of the event loop before upstream (whose turn depends on the input size and on the thread pool: 1 turn for 1 byte, 45 for 70 kB). Archiver core's `setImmediate` (core.js:180, 208) does not hide that: with `file()` of a missing path followed by `append()`, ykk emits `'entry'` and `'progress'` (`entries.total` 2) before the ENOENT `'warning'`, upstream the warning first (`entries.total` 1); and upstream's hang of `abort()` between an entry's completion and its deferred queue callback (P32) falls one turn earlier: `abort()` after one `setImmediate` never ends in ykk and ends upstream, after two the reverse. Stored entries are equal in both, and bytes are unaffected. For tar.gz `Gzip` (7.7) keeps zlib's order with `setImmediate`: each `_transform` / `_flush` pushes and calls back on a later turn of the event loop, and the last chunk of an ended stream ends the member, so `_flush` pushes nothing (node lib/zlib.js `_transform`, `_flush`, `processCallback`). `pointer()` when `finalize()` resolves and the place of `'close'` among a destination's events then match upstream, except where the thread pool answers before a pending `setImmediate` (a tar.gz of only directory entries: `pointer()` is 0 where upstream has 10, and `'close'` follows a `setImmediate`-deferred destination's `'finish'`) and where the deflate output is cut into different chunks (`level: 0`). |
+| V3 | Completion callbacks that upstream fires from zlib thread-pool completion fire from stream events of the per-entry `SmartStream` instead. They are still asynchronous. The ZipCrypto promise chain (zip-crypto-stream.js:69-73, 119-138) is not reproduced; the buffered chunks are encrypted in one synchronous loop. | No thread pool in wasm. For zip a deflated buffer entry completes in the turn its queue worker started, at least one turn of the event loop before upstream (whose turn depends on the input size and on the thread pool: 1 turn for 1 byte, 45 for 70 kB). Archiver core's `setImmediate` (core.js:180, 208) does not hide that: with `file()` of a missing path followed by `append()`, ykk emits `'entry'` and `'progress'` (`entries.total` 2) before the ENOENT `'warning'`, upstream the warning first (`entries.total` 1); and upstream's hang of `abort()` between an entry's completion and its deferred queue callback (P32) falls one turn earlier: `abort()` after one `setImmediate` never ends in ykk and ends upstream. After two, ykk ends and upstream is not stable: it hung in about 10 of 15 runs and ended in the others, depending on the thread pool. Only the one-turn case and the warning-order case are pinned for upstream (case R5). Stored entries are equal in both, and bytes are unaffected. For tar.gz `Gzip` (7.7) keeps zlib's order with `setImmediate`: each `_transform` / `_flush` pushes and calls back on a later turn of the event loop, and the last chunk of an ended stream ends the member, so `_flush` pushes nothing (node lib/zlib.js `_transform`, `_flush`, `processCallback`). `pointer()` when `finalize()` resolves and the place of `'close'` among a destination's events then match upstream, except where the thread pool answers before a pending `setImmediate` (a tar.gz of only directory entries: `pointer()` is 0 where upstream has 10, and `'close'` follows a `setImmediate`-deferred destination's `'finish'`) and where the deflate output is cut into different chunks (`level: 0`). |
 | V4 | Output chunk boundaries differ: upstream writes each header field as its own chunk (zip-archive-output-stream.js:325-351) and tar pushes header, pax block and padding separately; ykk emits what one wasm call produced as one chunk. | Byte stream identical; only the number of `'data'` events changes. |
 | V5 | `ZipArchiveOutputStream.getBytesWritten()` counts bytes for a non-ASCII archive comment (upstream adds `comment.length` in UTF-16 units, zip-archive-output-stream.js:193 with archive-output-stream.js:94). | Rust tracks byte offsets. Nothing reads the value after the comment is written. |
 | V6 | The second argument of a zip engine entry callback is the TypeScript `ZipArchiveEntry` record filled from a snapshot taken when the entry completes. Mutations the central directory pass makes later (zip64 extra, version 45) are not reflected on it. | The live entry is owned by Rust. Archiver core ignores the argument (core.js:172). |
 | V7 | `ZipArchiveEntry` setter errors that depend on negative numbers or wrong classes are unrepresentable in Rust and not ported there: `'invalid entry compressed size'`, `'invalid entry size'`, `'invalid entry crc32'`, `'invalid entry GeneralPurposeBit'` (zip-archive-entry.js:218-261). `'invalid entry compression method'` and `'invalid entry time'` survive on the TypeScript `ZipArchiveEntry` (section 7.6). | Unsigned types. No ykk code path can trigger them. |
-| V8 | A zlib processor error that never emits `'end'` (ZIP-053) cannot happen; the ZipCrypto unhandled-rejection hang (ENCRYPTED-047) cannot happen. Where the ykk engine itself fails in the middle of an entry (`ZipError::Deflate`, `ZipError::EntryTooLarge`), the error is not stored and lost as upstream's processor error is: it is delivered through the entry callback (13.4). | The failing component no longer exists; a failure of its replacement must be visible. |
+| V8 | A zlib processor error that never emits `'end'` (ZIP-053) cannot happen; the ZipCrypto unhandled-rejection hang (ENCRYPTED-047) cannot happen. Where the ykk engine itself fails in the middle of an entry (`ZipError::Deflate`), the error is not stored and lost as upstream's processor error is: it is delivered through the entry callback (13.4). | The failing component no longer exists; a failure of its replacement must be visible. |
 | V9 | `node:stream` replaces readable-stream v4 (core, utils, json, zip engine) and readable-stream v2 (lazystream). The v4 classes pass no extra constructor options: v4 is a snapshot of the Node 18 streams and has the same lifecycle defaults (`autoDestroy` and `emitClose` on). readable-stream 2.3.8 has neither option: upstream's lazy stream is never destroyed by its own end or by an error, and never emits `'close'`. `lazystream.Readable` is therefore constructed with `autoDestroy: false, emitClose: false` (7.4), which restores both, also on the path with no `'error'` listener (P22): the error handler of `pipe` then emits again synchronously instead of destroying the stream. Two differences remain on the lazy stream itself: it emits `'end'` before `'finish'` (v2: `'finish'` first), and a factory `fn` that throws arrives as an `'error'` event where v2 lets the exception escape from `read()`. | R1. For the v4 classes the differences are limited to default buffering thresholds on newer Node versions and to the errors the stream implementation raises itself: a chunk that is neither a string nor a Buffer from an objectMode source (`append(Readable.from([1]))`) is `ERR_INVALID_ARG_TYPE` in both, with the same `name`, event count, bytes written and `finalize()` outcome for zip, tar and tar.gz, but it is Node's own `TypeError` with wording that depends on the Node version (`Buffer, TypedArray, or DataView` on Node 24) where readable-stream has its `NodeError` (`Buffer or Uint8Array`, writable.js:270). For lazystream: no ykk engine listens for `'finish'` or `'close'` on a source, and archiver's factory is `createReadStream(task.filepath)` after an `lstat` of the same path succeeded (core.js:457-459). Observed by running lazystream 1.0.1 and the port side by side on Node 18.0, 18.20, 20, 22 and 24: with the two options the events and the `destroyed` flag are equal for a file read to its end, for an open error with a listener and for one without; with the `node:stream` defaults the port also emits `'close'` and ends up destroyed. GLOB-FS-092, GLOB-FS-095. |
 | V10 | New option `zip20Header` (12 bytes) on `ZipCryptoStream` / `ZipEncrypted` options and `header` on `CryptoStream` options: when present it replaces `crypto.randomBytes(12)` (crypto-stream.js:33). Bytes 10 and 11 are still overwritten with the CRC check bytes. The option must be a `Buffer` of exactly 12 bytes; anything else throws a `TypeError` in TypeScript (7.9). ykk also draws the per-entry random bytes at a different time than upstream: once at the start of every entry, before the local header, also for entries with no payload. Upstream draws the 12 ZipCrypto bytes inside the first `CryptoStream._transform` (crypto-stream.js:32-33), so only for entries with at least one payload byte and after the entry was compressed, and the AES salt in `_smartStream` after the local header (zip-aes-stream.js:151-153, 162). The number and order of `crypto.randomBytes` calls is therefore not part of the contract (ENCRYPTED-117); tests inject through `options.salt` / `zip20Header` / `header` and never through a stub that depends on the call count. | Project rule: random salts and IVs must be injectable. Upstream has an injection point only for the AES salt (`options.salt`, zip-aes-stream.js:162). The bytes are an argument of the one wasm call that starts the entry (5.3). |
 | V11 | The `Archiver` constructor also accepts the archiver 7 form `(format, options)`: if the first argument is a string it is ignored and the second is the options object. | R19. In archiver 8 a string first argument would be spread into characters, which nobody relies on. |
 | V12 | `Zip`, `Tar` and `Json` plugin instances carry `supports = { directory: true, symlink: true }` as in archiver 7 (archiver-zip-encrypted/node_modules/archiver/lib/plugins/zip.js:33). | Needed by `setModule` (R19). Not serialized, not otherwise read. |
 | V13 | wasm panics are bugs, never behavior. Where upstream would throw a JS `RangeError` or `TypeError` from a Buffer read on a short buffer in a path ykk cannot reach, Rust returns an `Err` with its own message. | Section 5.5. |
 | V14 | Values whose JS type is outside the published TypeScript types (a number as `comment`, an object as `uid`, a Buffer as archive comment) are out of contract unless a `BEHAVIORS.tsv` row covers the case. They must not trap the wasm instance; message parity is not required. For number parameters the JS-to-wasm call coerces (5.6). For string parameters (`&str`, `Option<String>`) the glue does not coerce and most non-strings trap: every argument at one is a string by construction or goes through `wasmString`, which throws a `TypeError` first (5.6, 15.3). For byte parameters (`&[u8]`) the glue does not validate and does not throw: every value that reaches one must be converted to a `Buffer` or rejected in TypeScript before the wasm call (5.6, 7.9). A `comment` that is not a string and that upstream would write (`.length > 0`, zip-stream/index.js:44, 134) is rejected with `TypeError('expected a string')` where the caller can see it: the archive option is thrown by the `ZipStream` constructor, the entry option is delivered through the entry callback (archiver emits `'error'`). Upstream writes a Buffer comment. | The wasm-bindgen glue has its own coercion rules. |
-| V15 | On the archiver 7 surface (the vending function and `ZipEncrypted`) ykk runs the archiver 8 core and the zip-stream 7 port, not archiver 7.0.0 / zip-stream 6.0.0 / compress-commons 6.0.0 / archiver-utils 5.0.1. Consequences: (a) options and entry data are copied with object spread, not defaulted in place with lodash `defaults`: the caller's options object does not gain `highWaterMark` / `statConcurrency` (so the encrypting engine keeps Node's default `highWaterMark` instead of 1 MiB), the caller's entry data object is not mutated, and the `'entry'` payload lacks the keys `namePrependSlash`, `linkname`, `store`, `comment` (for `symlink()` also `date`, `mode`, `store`) that zip-stream 6 wrote onto it; (b) a key explicitly set to `undefined` is not defaulted (`mode: undefined` gives platform FAT and external attributes 0 where the archiver 7 stack writes version-made-by `0x032D` and `0x81A40020`); (c) sources are detected with is-stream duck typing, not `instanceof Stream` (a duck-typed `{ readable: true, pipe }` object is accepted where archiver 7 emits `INPUTSTEAMBUFFERREQUIRED`). | R16, R19. One core for both surfaces; evidence: archiver-zip-encrypted/node_modules/archiver-utils/index.js:59-68, archiver/lib/core.js:35, 288, 580, zip-stream/index.js:62. ENCRYPTED-113 to ENCRYPTED-116. |
-| V16 | wasm32 memory limits. (a) No wasm call carries more than `MAX_CHUNK` = 1 MiB of payload; TypeScript slices (5.4). (b) The payload of a stored buffer entry of the plain engine never enters wasm: TypeScript computes its CRC in slices and writes the bytes itself, as upstream's `this.write(source)` (zip-archive-output-stream.js:86). (c) ZipCrypto buffers the compressed entry until it ends in the JS heap, as upstream (zip-crypto-stream.js:46-54), not in linear memory, which never shrinks: `writeData` hands the compressed bytes out, `SmartStream` keeps them in `_bufferedData`, and after `endData()` wrote the local header it passes them back through `encryptData` in slices (7.5). wasm holds the pipeline state, one slice and what the final flush of the deflate stream produced. (d) A name and an entry comment enter wasm whole and are copied several times there: one of more than 64 MiB of UTF-8 fails with `Error('entry name too large')` or `Error('entry comment too large')` delivered through the entry callback (archiver emits it as `'error'`), where upstream writes it (with the length field of P24). | A wasm32 slice cannot exceed 2 GiB and linear memory is 4 GiB in total; without the rule a large Buffer would abort the instance, and a name of 900 MB did (`rust_oom`). ZIP-137, ENCRYPTED-118. |
+| V15 | On the archiver 7 surface (the vending function and `ZipEncrypted`) ykk runs the archiver 8 core and the zip-stream 7 port, not archiver 7.0.0 / zip-stream 6.0.0 / compress-commons 6.0.0 / archiver-utils 5.0.1. Consequences: (a) options and entry data are copied with object spread, not defaulted in place with lodash `defaults`: the caller's options object does not gain `highWaterMark` / `statConcurrency` (so the encrypting engine keeps Node's default `highWaterMark` instead of 1 MiB), the caller's entry data object is not mutated, and the `'entry'` payload lacks the keys `namePrependSlash`, `linkname`, `store`, `comment` (for `symlink()` also `date`, `mode`, `store`) that zip-stream 6 wrote onto it. For `symlink()` on aes256 and zip20, upstream's `'entry'` payload carries the sanitized name (`evil-link` for `../../evil-link`), because zip-stream 6 writes it onto the entry data (archiver-zip-encrypted/node_modules/zip-stream/index.js:77). ykk emits the name as given. The archive bytes are equal (case D12); (b) a key explicitly set to `undefined` is not defaulted (`mode: undefined` gives platform FAT and external attributes 0 where the archiver 7 stack writes version-made-by `0x032D` and `0x81A40020`); (c) sources are detected with is-stream duck typing, not `instanceof Stream` (a duck-typed `{ readable: true, pipe }` object is accepted where archiver 7 emits `INPUTSTEAMBUFFERREQUIRED`). | R16, R19. One core for both surfaces; evidence: archiver-zip-encrypted/node_modules/archiver-utils/index.js:59-68, archiver/lib/core.js:35, 288, 580, zip-stream/index.js:62. ENCRYPTED-113 to ENCRYPTED-116. |
+| V16 | wasm32 memory limits. (a) No wasm call carries more than `MAX_CHUNK` = 1 MiB of payload; TypeScript slices (5.4). (b) The payload of a stored buffer entry of the plain engine never enters wasm: TypeScript computes its CRC in slices and writes the bytes itself, as upstream's `this.write(source)` (zip-archive-output-stream.js:86). (c) ZipCrypto buffers the compressed entry until it ends in the JS heap, as upstream (zip-crypto-stream.js:46-54), not in linear memory, which never shrinks: `writeData` hands the compressed bytes out, `SmartStream` keeps them in `_bufferedData`, and after `endData()` wrote the local header it passes them back through `encryptData` in slices (7.5). wasm holds the pipeline state, one slice and what the final flush of the deflate stream produced. (d) A name and an entry comment enter wasm whole and are copied several times there: one of more than 64 MiB of UTF-8 fails with `Error('entry name too large')` or `Error('entry comment too large')` delivered through the entry callback (archiver emits it as `'error'`), where upstream writes it (with the length field of P24). After this error each later entry of the same archive emits `already processing an entry` (13.4). No test pins that: case R4 uses a single entry. | A wasm32 slice cannot exceed 2 GiB and linear memory is 4 GiB in total; without the rule a large Buffer would abort the instance, and a name of 900 MB did (`rust_oom`). ZIP-137, ENCRYPTED-118. |
 | V17 | The wasm encoder of an engine stream is freed when the stream is destroyed (5.4). `isZip64()` called after that throws the glue's `Error` (`null pointer passed to rust`) where upstream would still answer from JS state. `entry()` and `finish()` on a destroyed stream (archiver core reaches both after a `signal` abort) do not touch the encoder and do what upstream's writes to a destroyed stream amount to: a stored or empty buffer entry of the plain engine completes and calls back, every other entry never calls back (upstream's smart stream piped into a destroyed stream never ends), `finish()` writes nothing. A stream whose `signal` was already aborted is destroyed inside `super()`, before the encoder exists; the constructor frees the encoder it then creates. | Linear memory is not garbage collected in step with the JS heap; waiting for `FinalizationRegistry` alone lets it grow without bound. |
 | V18 | The encrypted constructors (`ZipEncrypted`, `ZipAesStream`, `ZipCryptoStream`, `CryptoStream`, `DecryptoStream`, `AesHmacEtmStream`) called as `X.call(this, options)` from a `util.inherits` subclass return a new instance and leave `this` uninitialised; upstream initialises `this` (zip-encrypted.js:31-35). `class extends X`, `X(options)` and `new X(options)` behave as upstream, and `X.name` and `instance.constructor` are upstream's. | R18: an ES class cannot be applied to an existing `this`. |
 | V19 | archiver 7's `Archiver.prototype.use(plugin)` (archiver-zip-encrypted/node_modules/archiver/lib/core.js:913-916) is not ported; calling it throws a `TypeError`. | It is `@private` and "yet to be fully implemented": it pushes into `_streams`, which nothing reads. archiver 8 removed it. |
@@ -660,7 +660,7 @@ cjs/index.d.cts                              hand-written declaration of the Com
 esm/index.mjs                                hand-written ESM entry, re-exports cjs/index.cjs (pinned, 15.4)
 
 pkg/                                         wasm-pack output: ykk_wasm.cjs, ykk_wasm_bg.wasm, ykk_wasm.d.cts (build output, gitignored)
-dist/                                        tsup output: index.mjs (tests only, not published), index.cjs, index.d.ts, index.d.cts (build output, gitignored)
+dist/                                        tsup output: index.cjs, index.d.ts, index.d.cts, and index.mjs (built, not published, loaded by nothing; 15.4) (build output, gitignored)
 
 scripts/fetch-upstream.sh                    exists; restores .upstream/ including both node_modules trees (header of this file)
 scripts/build-wasm.sh                        (pinned, 15.2)
@@ -672,7 +672,7 @@ scripts/verify-oracle-versions.mjs           fails unless the installed upstream
 scripts/check-test-ledger.mjs                compares both mocha suites with tests/upstream/LEDGER.tsv and `cargo test -- --list` with crates/ykk-core/tests/LEDGER.tsv (14.5)
 scripts/capture-golden.mjs                   runs the real upstream engines with fixed inputs, writes crates/ykk-core/tests/golden/ and tests/vectors/ (14.3)
 tests/upstream/node-archiver/package.json    {"type":"module"}
-tests/upstream/node-archiver/index.js        one-line shim: export * from "../../../dist/index.mjs"
+tests/upstream/node-archiver/index.js        one-line shim: export * from "../../../esm/index.mjs" (the published ESM entry)
 tests/upstream/node-archiver/test/**         verbatim copy of .upstream/node-archiver/test (archiver.js, plugins.js, helpers/, fixtures/)
 tests/upstream/archiver-zip-encrypted/package.json   {"type":"commonjs"}
 tests/upstream/archiver-zip-encrypted/index.js       shim (14.1)
@@ -687,6 +687,8 @@ tests/differential/helpers/decrypt.mjs       ZipCrypto and WinZip AES payload de
 tests/differential/helpers/events.mjs        event recorder and payload summaries
 tests/differential/zip-plain.test.mjs  tar.test.mjs  targz.test.mjs  json.test.mjs  aes.test.mjs  zip20.test.mjs
 tests/differential/errors-events.test.mjs  preserved-defects.test.mjs  extraction.test.mjs
+tests/differential/large.test.mjs  crypto-streams.test.mjs  glob-options.test.mjs  behaviors.test.mjs
+tests/differential/destroy-abort.test.mjs  preserved-defects-2.test.mjs
 tests/differential/zip-large.slow.mjs        entries above 4 GiB and buffers above 1 GiB; run on demand (14.2)
 tests/unit/sanitize-path.test.ts             the shared vectors against the three TypeScript sanitizer copies (14.3)
 tests/vectors/sanitize-path.json             shared vectors for all sanitizePath/normalizePath copies (generated, 14.3)
@@ -724,9 +726,9 @@ another unit (the phases after the loop follow 2.1).
 | ts-encrypted | ts | `src/encrypted/**` |
 | tests-upstream | tests | `tests/upstream/**` (including the two upstream license files), `scripts/{vendor-upstream-tests,verify-upstream-tests,check-test-ledger}.mjs` |
 | tests-diff-helpers | tests | `tests/differential/helpers/*.mjs`, `scripts/verify-oracle-versions.mjs` |
-| tests-diff-zip | tests | `tests/differential/{zip-plain,aes,zip20}.test.mjs`, `tests/differential/zip-large.slow.mjs` |
+| tests-diff-zip | tests | `tests/differential/{zip-plain,aes,zip20,large,crypto-streams}.test.mjs`, `tests/differential/zip-large.slow.mjs` |
 | tests-diff-tar-json | tests | `tests/differential/{tar,targz,json}.test.mjs` |
-| tests-diff-behavior | tests | `tests/differential/{errors-events,preserved-defects,extraction}.test.mjs` |
+| tests-diff-behavior | tests | `tests/differential/{errors-events,preserved-defects,extraction,glob-options,behaviors,destroy-abort,preserved-defects-2}.test.mjs` |
 | tests-golden | tests | `scripts/capture-golden.mjs`, `crates/ykk-core/tests/**`, `tests/vectors/**`, `tests/unit/sanitize-path.test.ts` |
 
 The `#[cfg(test)]` module inside a Rust source file belongs to the unit that owns the file
@@ -1063,7 +1065,7 @@ only the wasm-bindgen intrinsics), no callbacks into JS, no `js-sys`, no `serde`
   as `WebAssembly.RuntimeError: unreachable` and the instance must be considered dead.
   Therefore no reachable Rust code may index, slice, `unwrap`, `expect` or do unchecked
   arithmetic on a value derived from input (section 11). An allocation failure is also an
-  abort; the slice rule and `try_reserve` (5.4) remove every allocation whose size the
+  abort; the slice rule (5.4) removes every allocation whose size the
   payload of an entry can choose. A trap is never caught and swallowed: the only `try`/`catch` around wasm
   calls is in `SmartStream`, and it delivers what it catches through the entry callback
   (13.4). ykk does not try to fence or re-create a trapped instance.
@@ -1172,9 +1174,9 @@ pub use pack::{overflow, Pack, END_OF_TAR};
 
 `Display` strings are part of the contract. "upstream" strings are copied from the cited
 line. "ykk" variants guard misuse of the sans-IO API and cannot be reached from TypeScript
-when section 7 is followed, with one exception that depends on the data: `Deflate`
-(`EntryTooLarge` is no longer produced: the buffered ZipCrypto entry left wasm, V16). How
-TypeScript reports it is pinned in 13.4.
+when section 7 is followed, with one exception that depends on the data: `Deflate`. How
+TypeScript reports it is pinned in 13.4. No variant depends on the size of an entry: the
+buffered ZipCrypto entry is kept by TypeScript (V16).
 
 ```rust
 use std::fmt;
@@ -1193,7 +1195,6 @@ pub enum ZipError {
     InvalidRandomLength { expected: usize, actual: usize }, // "expected {expected} random bytes, got {actual}"  ykk
     InvalidKeyLength { expected: usize, actual: usize },    // "expected a {expected} byte key, got {actual}"    ykk
     InvalidEncryption(u8),   // "unknown encryption method {0}"                   ykk
-    EntryTooLarge,           // "zip20 entry too large"                           ykk (V16: a try_reserve for the buffered ZipCrypto entry failed)
     Deflate(String),         // "deflate error: {0}"                              ykk
 }
 impl fmt::Display for DeflateError { /* as above */ }
@@ -4093,8 +4094,7 @@ When the callback is not a function, the zip engine uses `_emitErrorCallback`
 
 `ZipError` values reach TypeScript as thrown `Error`s (5.5). With section 7 followed, the
 variants that guard misuse are not reachable from user input; they exist to keep the
-sans-IO API total. One variant depends on the data: `Deflate` (`EntryTooLarge` stays in
-the enum and is no longer produced, V16).
+sans-IO API total. One variant depends on the data: `Deflate`.
 
 TypeScript does not catch exceptions from wasm calls except in `SmartStream` (7.5), and
 there an exception is never swallowed: `SmartStream._fail` destroys the per-entry stream
@@ -4139,7 +4139,7 @@ imports are satisfied by shim files placed where the tests expect the library:
 
 ```
 tests/upstream/node-archiver/package.json            {"type":"module"}
-tests/upstream/node-archiver/index.js                export * from "../../../dist/index.mjs";
+tests/upstream/node-archiver/index.js                export * from "../../../esm/index.mjs";
 tests/upstream/node-archiver/test/...                verbatim (archiver.js, plugins.js, helpers/index.js, fixtures/**)
 
 tests/upstream/archiver-zip-encrypted/package.json   {"type":"commonjs"}
@@ -4188,7 +4188,9 @@ Mocha's default spec (`./test/*.{js,cjs,mjs}`, not recursive) selects exactly th
 `this.skip()`, and they share fixture symlinks and the `tmp/` and `target/` directories, so
 they must run serially in one process (TESTS-014, R20). No `.mocharc` file exists anywhere
 in the repository (mocha would pick it up from a parent directory and change these runs).
-The node-archiver suite exercises the ESM build, the encrypted suite the CJS build.
+The node-archiver suite loads the published ESM entry (`esm/index.mjs`), the encrypted
+suite the published CommonJS entry (`cjs/index.cjs`). Both run the one implementation in
+`dist/index.cjs` (15.4).
 
 Prerequisites: `7z` on `PATH` (5 tests spawn it); a clean fixture tree (a crashed run
 leaves two symlinks behind that make the next run fail with EEXIST, TESTS-012: the npm
@@ -4239,6 +4241,12 @@ Files (each is a `PORTMAP.tsv` row; units in 4.1):
 | `helpers/events.mjs` | Records `entry`, `progress`, `warning`, `error`, `end`, `close` with payload summaries (own enumerable keys in order, `Date` as ISO string, `stats` reduced to `size` and type, errors as `{ name, code, message, data }`). |
 | `zip-plain.test.mjs`, `tar.test.mjs`, `targz.test.mjs`, `json.test.mjs`, `aes.test.mjs`, `zip20.test.mjs` | the format cases of the table below |
 | `errors-events.test.mjs`, `preserved-defects.test.mjs`, `extraction.test.mjs` | the behavior cases of the table below and the checks of 14.4 |
+| `large.test.mjs` | payloads above `MAX_CHUNK` through every loop that slices before a wasm call (L1) |
+| `crypto-streams.test.mjs` | the exported encryption classes used on their own (W1 to W4) and passwords outside ASCII (W5) |
+| `glob-options.test.mjs` | every `glob()` option that core.js:672-699 passes to readdir-glob (O1) |
+| `behaviors.test.mjs` | rows of `BEHAVIORS.tsv` that no other case reaches (B1 to B5) |
+| `destroy-abort.test.mjs` | a `signal` aborted in the middle of an archive and before construction (V17), a Buffer comment (V14), names and comments over the length field and over the wasm limit (P24, V16 (d)), the two timing differences of V3 (R1 to R5) |
+| `preserved-defects-2.test.mjs` | the preserved defects that `preserved-defects.test.mjs` does not reach (D9 to D17, P24 to P32) |
 | `zip-large.slow.mjs` | the S cases |
 
 Determinism: every entry gets an explicit `date`; `Date` is replaced by a fixed-clock
@@ -4346,12 +4354,48 @@ case demonstrates. Every P row of 3.3 appears at least once (section 16 item 7).
 | D6 | preserved-defects | `collectStream` on a stream that errors and then ends; a plugin `append` with an unknown `sourceType` | tar, json | D | P21 |
 | D7 | preserved-defects | a lazily opened file that fails to open in the tar-with-stats path (crash) | tar | D | P22 |
 | D8 | preserved-defects | a dangling path whose `readlinkSync` throws: through `file(path, { stats })` (synchronous throw), through the stat queue (crash), through `directory()` (globber `'error'`) | zip | D | 13.3 |
+| D9 | preserved-defects-2 | a name, an entry comment and an archive comment of 65535, 65536, 70000 and 70002 (non-ASCII) bytes, and all three at once: the length fields hold the length modulo 65536 and every byte is written | zip, aes256, zip20 (stored) | D | P24 |
+| D10 | preserved-defects-2 | a NUL character in a name and in a linkname: it is in the ustar field, no pax header, and a reader sees the name cut there | tar | D | P25 |
+| D11 | preserved-defects-2 | names of 28, 90, 2000 and 16000 segments and one with no separator: equal headers. The bounded instance of the defect: 16000 separators take milliseconds | tar | D | P26 |
+| D12 | preserved-defects-2 | interior `..` segments, a drive letter behind a prefix, `symlink()` names and targets that are not sanitized. For aes256 and zip20 the `'entry'` name of a `symlink()` is asserted on both sides as the difference of V15 (a) | zip, aes256, zip20 (stored), tar, json | D | P27, V15 |
+| D13 | preserved-defects-2 | `glob('**', { follow: true })` over a directory with one link to itself, walked until `ELOOP`: equal events and names, equal bytes for zip and tar. The bounded instance of the defect: one link is linear, each further link doubles the walk | zip (stored), tar, json | D | P28 |
+| D14 | preserved-defects-2 | a file shorter, longer, emptied or doubled against its `stats`: `Size mismatch` as `'error'` twice, `finalize()` rejects, two uncaught exceptions (crash) | tar, tar.gz | D | P29 |
+| D15 | preserved-defects-2 | `destroy()` while a 16 MiB file is being read: the engine and the `fs.ReadStream` are not destroyed and one descriptor stays open; `abort()` closes it (child process) | zip (deflated and stored), aes256, tar.gz | D | P30 |
+| D16 | preserved-defects-2 | `constructor`, `toString`, `hasOwnProperty`, `valueOf`, `__proto__` as format names: registered, `create()` throws a `TypeError`, `registerFormat()` is refused | archiver 7 surface | D | P31 |
+| D17 | preserved-defects-2 | `abort()` 0, 1, 2 and 3 turns after `append()`: only after 1 turn there is no `'end'` and no `'close'` (hang) | zip (stored), aes256 (stored), json | D | P32 |
 | X1 | extraction | the checks of 14.4 over the ykk outputs of the Z, T, G, A and C cases | all | D | |
+| L1 | large | a payload of 5 MiB + 123 bytes, compressible and incompressible, as a `Buffer`, as a stream of one chunk and as a stream of three chunks cut off the 1 MiB boundary: zip, aes256 and zip20, stored and deflated; tar; tar.gz at the default level, level 1 and level 0; json; `AesHmacEtmStream`, `CryptoStream`, `DecryptoStream` and `CryptoCipher` written to directly. Every payload is also extracted and compared with the source | all | D | V16, ZIP-137, ENCRYPTED-118 |
+| W1 | crypto-streams | `AesHmacEtmStream` on its own: salt given and drawn, string and `Buffer` keys, keys outside ASCII, empty chunks, chunks of 1 to 40 bytes and above 1 MiB, called without `new`; the salt, key and verifier fields | aes256 | D | 7.9 |
+| W2 | crypto-streams | `CryptoStream` on its own: the check bytes, no data (nothing written, no random bytes drawn), the `header` option | zip20 | D | V10 |
+| W3 | crypto-streams | `DecryptoStream` on its own: called without `new`, a `Buffer` key, a key outside ASCII, a wrong key; `CryptoStream` piped into it | zip20 | D | 7.9 |
+| W4 | crypto-streams | `CryptoCipher`: `encrypt` and `decrypt` call after call, known bytes, data above 3 MiB | zip20 | D | 7.9 |
+| W5 | crypto-streams | passwords outside ASCII: a string, a `Buffer` of the same UTF-8 bytes, a `Buffer` that is not UTF-8 and one of the latin1 bytes; through `ZipEncrypted` and through the engine built by hand; decrypted under the expected bytes and by `7z` | aes256, zip20 | D | ENCRYPTED-006 |
+| O1 | glob-options | one `glob()` per option on a tree with a mixed-case file, dot entries, an empty directory and three symlinks: `nodir`, `mark`, `skip`, `follow`, `nocase`, `matchBase`, `noglobstar`, `dot`, `ignore`, `cwd` (absent and relative ones in a child process), `absolute`, `stat`, an array pattern, entry data. Compared with upstream and with the entry list written in the case; one combined case also as stored zip and tar | json, zip, tar | D | |
+| B1 | behaviors | constructor defaults: `highWaterMark` and `statConcurrency` given, absent and `null`; `statConcurrency: 0` throws | all | D | ARCHIVER-CORE-006, ARCHIVER-CORE-009 |
+| B2 | behaviors | the number of `lstat` calls in flight equals `statConcurrency` | json, zip, aes256 | D | ARCHIVER-CORE-009 |
+| B3 | behaviors | a mode read from stats keeps the bits above 0777 | all | D | ARCHIVER-CORE-033 |
+| B4 | behaviors | a failed `lstat` takes its entry out of `entries.total` | all | D | ARCHIVER-CORE-047 |
+| B5 | behaviors | bytes written to the ZipCrypto engine while an entry is open: the local header offsets are the real positions | zip20 | D | ZIP-135 |
+| R1 | destroy-abort | a `signal` aborted at the second `'entry'` with `file()` entries queued, and while a stream entry is being written (child process). zip kinds: no uncaught exception, `AbortError` (`ABORT_ERR`) twice, `finalize()` rejects with it, events equal, stored bytes equal. tar and tar.gz: both crash with `already finalized or destroyed`. json: equal. `progress.fs.totalBytes` is masked, it races in upstream itself | zip (deflated and stored), aes256, zip20, tar, tar.gz, json | D | V17 |
+| R2 | destroy-abort | a `signal` that is already aborted at construction, with and without one entry (child process). zip: `AbortError` twice and as the rejection. aes256 and zip20: the uncaught exception is the `AbortError` in both. tar, tar.gz, json: equal events and outcome | zip (deflated and stored), aes256, zip20, tar, tar.gz, json | D | V17 |
+| R3 | destroy-abort | a `Buffer` as comment. Archive option: ykk throws `TypeError('expected a string')` from the constructor. Entry data: ykk emits it as `'error'`, no uncaught exception. Upstream writes the comment in both | zip (deflated and stored), aes256, zip20 | D | V14 |
+| R4 | destroy-abort | a name of 70000 bytes, ASCII and non-ASCII: completes, length field 4464, local header equal, whole archive equal for the stored kinds. A name of exactly 64 MiB: same length and SHA-256 as upstream (zip, stored). A name or an entry comment of 64 MiB + 1: `'error'` `entry name too large` / `entry comment too large` in ykk and no trap, upstream writes it (zip stored, aes256, zip20). One entry per archive | zip (deflated and stored), aes256, zip20 (each also stored) | D | P24, V16 (d) |
+| R5 | destroy-abort | the two timing differences of a deflated buffer entry. A missing `file()` plus `append()`: upstream `warning`, `entry`, `progress` (total 1), ykk `entry`, `progress` (total 2), `warning`. `abort()` one turn after `append()`: upstream ends, ykk never ends. Two turns after: ykk ends, upstream is accepted with either outcome. The stored controls (the warning case, and `abort()` after 0, 1 and 2 turns) are equal | zip | D | V3, P32 |
 | S1 | zip-large.slow | a streamed entry above 4 GiB from a sparse file | zip, aes256 | D | P15, P18, P19 |
 | S2 | zip-large.slow | a 1.5 GiB `Buffer`, stored and deflated (must complete and compare) | zip, aes256, tar | D | V16 |
 | S3 | zip-large.slow | a stored `Buffer` above 0xFFFFFFFF bytes, where the Node version allows one | zip | D | ZIP-058 |
-| S4 | zip-large.slow | a ZipCrypto entry above 1 GiB, which did not fit while the entry was buffered in wasm (must complete and compare) | zip20 | D | V16 |
+| S4 | zip-large.slow | a ZipCrypto entry above 1 GiB: a sparse stream of 2 GiB + 1 MiB, stored and deflated. It did not fit while the entry was buffered in wasm (must complete and compare) | zip20 | D | V16 |
 | S5 | zip-large.slow | 65536 entries | zip | D | zip64 by count |
+
+B1 to B5, W1 to W4, D9 to D17, R1 to R5 and S1 to S5 are the ids in the `describe`
+titles of their files (S4 is `S4 a ZipCrypto entry above 1 GiB (V16)`). L1, O1 and W5
+are ids of this table only: those suites are named by their `describe` title
+(`payloads above MAX_CHUNK (V16)`, `glob() options`, `passwords outside ASCII
+(ENCRYPTED-006)`).
+
+Not demonstrated: the extra field half of P24. No public API lets a caller set an extra
+field over 65535 bytes (`ZipArchiveEntry` is not exported). The name of 900 MB of V16 is
+not run either.
 
 ### 14.3 Cargo tests (`cargo test --workspace`, debug and `--release`) and the shared vectors
 
@@ -4883,8 +4927,11 @@ export const {
 
 Node finds no named export on `cjs/index.cjs` by static analysis (they are attached in a
 loop), hence the list; `scripts/check-tarball.mjs` fails when it differs from the keys of
-the CommonJS entry. `dist/index.mjs` is still built, for the node-archiver suite and the
-differential tests (14.1, 14.2), and is left out of the tarball by `files`. The top-level
+the CommonJS entry. `dist/index.mjs` is still built, because the `esm` format of
+tsup is what produces `dist/index.d.ts`, the types of the `import` entry. Nothing loads
+it: the node-archiver suite and the differential tests import `esm/index.mjs` (14.1,
+14.2), so the tests run the entry that is published. It is left out of the tarball by
+`files`. The top-level
 `types` describes `main`, for a compiler that does not read `exports`
 (`moduleResolution: node10`).
 

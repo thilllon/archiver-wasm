@@ -57,7 +57,7 @@ const shims = {
     '};',
   ],
   'node-archiver/package.json': ['{"type":"module"}'],
-  'node-archiver/index.js': ['export * from "../../../dist/index.mjs";'],
+  'node-archiver/index.js': ['export * from "../../../esm/index.mjs";'],
   'archiver-zip-encrypted/package.json': ['{"type":"commonjs"}'],
   'archiver-zip-encrypted/index.js': ["module.exports = require('./lib/zip-encrypted');"],
   'archiver-zip-encrypted/lib/zip-encrypted.js': ["module.exports = require('../../../../cjs/index.cjs').ZipEncrypted;"],
