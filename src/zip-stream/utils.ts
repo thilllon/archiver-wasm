@@ -17,7 +17,7 @@ export function dateify(dateish?: unknown): Date {
 
 // deps/zip-stream/utils.js:17-21
 export function sanitizePath(filepath: string): string {
-  return normalizePath(filepath, false)
+  return normalizePath(filepath)
     .replace(/^\w+:/, "")
     .replace(/^(\.\.\/|\/)+/, "");
 }

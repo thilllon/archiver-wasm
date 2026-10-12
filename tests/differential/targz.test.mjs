@@ -44,7 +44,7 @@ function streamOf(chunks) {
 }
 
 // PORTING.md 14.2 (determinism: modes are set by chmod, times by lutimes)
-export function makeTree() {
+function makeTree() {
   const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'ykk-diff-targz-')));
   const target = path.join(root, 'b.bin');
   fs.writeFileSync(target, Buffer.alloc(600, 0x62));
@@ -54,12 +54,12 @@ export function makeTree() {
 }
 
 // PORTING.md 14.2
-export function removeTree(root) {
+function removeTree(root) {
   fs.rmSync(root, { recursive: true, force: true });
 }
 
 // PORTING.md 14.2 (case G1: the inputs of T1 with gzip: true)
-export async function g1(impl, ctx) {
+async function g1(impl, ctx) {
   const archive = ctx.create('tar.gz', 'gzipOptions' in ctx.args ? { gzipOptions: ctx.args.gzipOptions } : {});
   archive.append(Buffer.alloc(0), { name: 'empty-buffer.txt', date: DATE });
   archive.append(streamOf([]), { name: 'empty-stream.txt', date: DATE });
@@ -83,20 +83,20 @@ export async function g1(impl, ctx) {
 }
 
 // PORTING.md 14.2 (case G2: abort() with gzip before any entry)
-export async function g2GzipBeforeEntry(impl, ctx) {
+async function g2GzipBeforeEntry(impl, ctx) {
   const archive = ctx.create('tar.gz');
   return archive.abort() === archive;
 }
 
 // PORTING.md 14.2 (case G2: abort() with gzip in the tick of an append())
-export async function g2GzipAfterAppend(impl, ctx) {
+async function g2GzipAfterAppend(impl, ctx) {
   const archive = ctx.create('tar.gz');
   archive.append('x', { name: 'never-written.txt', date: DATE });
   return archive.abort() === archive;
 }
 
 // PORTING.md 14.2 (case G2: abort() without gzip throws out of Tar.unpipe, P9)
-export async function g2PlainBeforeEntry(impl, ctx) {
+async function g2PlainBeforeEntry(impl, ctx) {
   const archive = ctx.create('tar');
   assert.throws(
     function () {
@@ -108,7 +108,7 @@ export async function g2PlainBeforeEntry(impl, ctx) {
 }
 
 // PORTING.md 14.2 (case G2: the same in the tick of an append())
-export async function g2PlainAfterAppend(impl, ctx) {
+async function g2PlainAfterAppend(impl, ctx) {
   const archive = ctx.create('tar');
   archive.append('x', { name: 'never-written.txt', date: DATE });
   assert.throws(

@@ -5,7 +5,6 @@ pub const HEADER_LENGTH: usize = 12;
 
 // archiver-zip-encrypted/lib/zip20/crypto-stream.js:13
 pub struct CryptoStream {
-    pub key: Vec<u8>,
     pub crc: u16,
     pub cipher: CryptoCipher,
     pub header_sent: bool,
@@ -16,7 +15,6 @@ impl CryptoStream {
     // archiver-zip-encrypted/lib/zip20/crypto-stream.js:13-24
     pub fn new(key: &[u8], crc: u16, header: [u8; 12]) -> Self {
         CryptoStream {
-            key: key.to_vec(),
             crc,
             cipher: CryptoCipher::new(key),
 
@@ -66,7 +64,6 @@ mod tests {
     #[test]
     fn header_check_bytes() {
         let mut stream = CryptoStream::new(b"123", 0xABF0, HEADER);
-        assert_eq!(stream.key, b"123");
         assert!(!stream.header_sent);
         let mut out = Vec::new();
         stream._transform(b"hello", &mut out);

@@ -3,22 +3,20 @@
 // Run before the differential tests and before scripts/capture-golden.mjs.
 //
 //   node scripts/verify-oracle-versions.mjs
-//   import { verifyOracleVersions } from './verify-oracle-versions.mjs'   -> rows; throws on a mismatch
 
 import fs from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
-const SELF = fileURLToPath(import.meta.url);
-export const ROOT = path.resolve(path.dirname(SELF), '..');
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 // [name, version, dependencies]: each package is located from the directory of the package that
 // depends on it. The three rows of the table are the root, `archiver` 8.0.0 and
 // `archiver-zip-encrypted` 2.0.0; below them the nesting follows the `dependencies` of each package.
 // One package beyond the table: the crc32-stream that compress-commons 6.0.0 resolves (its own 5.0.1,
 // not the 6.0.0 of the third row), which every entry of the archiver 7 stack passes through.
-export const ORACLE = [
+const ORACLE = [
   [
     'archiver',
     '8.0.0',
@@ -109,32 +107,25 @@ function check(nodes, fromDirectory, fromLabel, rows) {
   }
 }
 
-export function oracleRows(root = ROOT) {
+function verifyOracleVersions() {
   const rows = [];
-  check(ORACLE, fs.realpathSync(root), 'the repository root', rows);
-  return rows;
-}
-
-export function verifyOracleVersions(root = ROOT) {
-  const rows = oracleRows(root);
+  check(ORACLE, fs.realpathSync(ROOT), 'the repository root', rows);
   const wrong = rows.filter((row) => !row.ok);
   if (wrong.length > 0) {
     const lines = wrong.map(
       (row) =>
         `  ${row.name}: expected ${row.expected}, found ${row.found === null ? 'nothing' : row.found}` +
-        ` (resolved from ${row.from}${row.directory === null ? '' : `, at ${path.relative(root, row.directory)}`})`
+        ` (resolved from ${row.from}${row.directory === null ? '' : `, at ${path.relative(ROOT, row.directory)}`})`
     );
     throw new Error(`oracle versions differ from PORTING.md 14.2:\n${lines.join('\n')}`);
   }
   return rows;
 }
 
-if (process.argv[1] !== undefined && path.resolve(process.argv[1]) === SELF) {
-  try {
-    const rows = verifyOracleVersions();
-    console.log(`oracle versions ok: ${rows.length} packages checked`);
-  } catch (err) {
-    console.error(err.message);
-    process.exit(1);
-  }
+try {
+  const rows = verifyOracleVersions();
+  console.log(`oracle versions ok: ${rows.length} packages checked`);
+} catch (err) {
+  console.error(err.message);
+  process.exit(1);
 }

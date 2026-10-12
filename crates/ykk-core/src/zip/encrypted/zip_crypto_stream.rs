@@ -294,7 +294,7 @@ mod tests {
         };
         // nothing reaches the archive before the entry ends (ENCRYPTED-041)
         let buffered_data = zip.take_output();
-        assert_eq!(zip.get_bytes_written(), 0);
+        assert_eq!(zip.offset, 0);
         assert!(zip._archive.processing);
         zip.end_data().unwrap();
         assert!(zip._archive.processing);
@@ -306,7 +306,7 @@ mod tests {
         assert!(zip._entry.is_none());
         assert_eq!(zip._entries.len(), 1);
         let record = zip.take_output();
-        assert_eq!(zip.get_bytes_written(), record.len() as u64);
+        assert_eq!(zip.offset, record.len() as u64);
         zip.finish();
         let central = zip.take_output();
 
@@ -434,7 +434,7 @@ mod tests {
             .unwrap();
         zip.end_data().unwrap();
         zip.encrypt_end().unwrap();
-        assert_eq!(zip.get_bytes_written(), 32);
+        assert_eq!(zip.offset, 32);
 
         let mut ae = ZipArchiveEntry::new(Some("a.txt"));
         ae.set_method(METHOD_STORED as u16);
@@ -446,7 +446,7 @@ mod tests {
         zip.end_data().unwrap();
         zip.encrypt_data(b"hello").unwrap();
         zip.encrypt_end().unwrap();
-        assert_eq!(zip.get_bytes_written(), 32 + 35 + 17);
+        assert_eq!(zip.offset, 32 + 35 + 17);
         assert_eq!(zip._entries[0]._offsets.file, 0);
         assert_eq!(zip._entries[1]._offsets.file, 32);
         assert_eq!(zip._entries[1]._offsets.contents, 32 + 35);

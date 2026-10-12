@@ -38,11 +38,6 @@ impl ZipArchiveOutputStream {
         self._finish();
     }
 
-    // deps/compress-commons/lib/archivers/archive-output-stream.js:88-90
-    pub fn get_bytes_written(&self) -> u64 {
-        self.offset
-    }
-
     // deps/compress-commons/lib/archivers/archive-output-stream.js:92-97
     pub fn write(&mut self, chunk: &[u8]) {
         self.offset = self.offset.wrapping_add(chunk.len() as u64);
@@ -157,7 +152,7 @@ mod tests {
         let eocd = archive.len() - 22;
         assert_eq!(&archive[eocd..eocd + 4], b"PK\x05\x06");
         assert_eq!(&archive[eocd + 16..eocd + 20], &[54 + 6, 0, 0, 0]);
-        assert_eq!(zip.get_bytes_written(), 133);
+        assert_eq!(zip.offset, 133);
     }
 
     #[test]
@@ -200,18 +195,18 @@ mod tests {
     }
 
     #[test]
-    fn write_and_get_bytes_written() {
+    fn write_advances_offset() {
         let mut zip = ZipArchiveOutputStream::new(false, Encryption::None);
-        assert_eq!(zip.get_bytes_written(), 0);
+        assert_eq!(zip.offset, 0);
         zip.write(b"abc");
         zip.write(b"");
         zip.write(b"de");
-        assert_eq!(zip.get_bytes_written(), 5);
+        assert_eq!(zip.offset, 5);
         assert_eq!(zip.take_output(), b"abcde");
-        assert_eq!(zip.get_bytes_written(), 5);
+        assert_eq!(zip.offset, 5);
         zip.set_offset(0x1_0000_0000);
         zip.write(b"f");
-        assert_eq!(zip.get_bytes_written(), 0x1_0000_0001);
+        assert_eq!(zip.offset, 0x1_0000_0001);
         assert_eq!(zip.take_output(), b"f");
     }
 }

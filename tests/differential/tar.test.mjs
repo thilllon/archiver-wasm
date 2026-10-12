@@ -41,7 +41,7 @@ function streamOf(chunks) {
 }
 
 // PORTING.md 14.2 (determinism: modes are set by chmod, times by lutimes)
-export function makeTree() {
+function makeTree() {
   const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'ykk-diff-tar-')));
   const write = (rel, data, mode) => {
     const target = path.join(root, rel);
@@ -65,12 +65,12 @@ export function makeTree() {
 }
 
 // PORTING.md 14.2
-export function removeTree(root) {
+function removeTree(root) {
   fs.rmSync(root, { recursive: true, force: true });
 }
 
 // PORTING.md 14.2 (case T1: the sources of Z1 and Z2; sizes that are and are not multiples of 512)
-export async function t1(impl, ctx) {
+async function t1(impl, ctx) {
   const archive = ctx.create('tar');
   archive.append(Buffer.alloc(0), { name: 'empty-buffer.txt', date: DATE });
   archive.append(streamOf([]), { name: 'empty-stream.txt', date: DATE });
@@ -94,7 +94,7 @@ export async function t1(impl, ctx) {
 }
 
 // PORTING.md 14.2 (case T2: directories by append(), symlink() under the fixed clock, P10)
-export async function t2Appended(impl, ctx) {
+async function t2Appended(impl, ctx) {
   const archive = ctx.create('tar');
   archive.append(null, { name: 'dir/', date: DATE });
   archive.append(null, { name: 'typed-dir', type: 'directory', date: DATE });
@@ -106,21 +106,21 @@ export async function t2Appended(impl, ctx) {
 }
 
 // PORTING.md 14.2 (case T2: one directory() over a tree with sub-directories and symlinks on disk)
-export async function t2Directory(impl, ctx) {
+async function t2Directory(impl, ctx) {
   const archive = ctx.create('tar');
   archive.directory(ctx.args.root, 'tree');
   await archive.finalize();
 }
 
 // PORTING.md 14.2 (case T2: one file() on what ctx.args.rel names: a directory or a symlink)
-export async function t2File(impl, ctx) {
+async function t2File(impl, ctx) {
   const archive = ctx.create('tar');
   archive.file(path.join(ctx.args.root, ctx.args.rel), { name: ctx.args.name });
   await archive.finalize();
 }
 
 // PORTING.md 14.2 (case T3: names of 100, 101, 155+100 and 256+ bytes; non-ASCII names; P13)
-export async function t3(impl, ctx) {
+async function t3(impl, ctx) {
   const archive = ctx.create('tar');
   archive.append('x', { name: 'a'.repeat(100), date: DATE });
   archive.append('x', { name: 'a'.repeat(101), date: DATE });
@@ -146,7 +146,7 @@ export async function t3(impl, ctx) {
 }
 
 // PORTING.md 14.2 (case T4: mtime 2038, 2107, before 1970, Invalid Date; P11)
-export async function t4(impl, ctx) {
+async function t4(impl, ctx) {
   const archive = ctx.create('tar');
   archive.append('x', { name: 'last-31-bit', date: new Date('2038-01-19T03:14:07Z') });
   archive.append('x', { name: 'first-wrapped', date: new Date('2038-01-19T03:14:08Z') });
@@ -162,7 +162,7 @@ export async function t4(impl, ctx) {
 }
 
 // PORTING.md 14.2 (case T5: uid, gid, uname, gname (also over-long), devmajor, caller pax, mode 0 and null; P12)
-export async function t5(impl, ctx) {
+async function t5(impl, ctx) {
   const archive = ctx.create('tar');
   archive.append('x', { name: 'ids', date: DATE, uid: 1000, gid: 20, uname: 'user', gname: 'staff' });
   archive.append('x', {
@@ -187,7 +187,7 @@ export async function t5(impl, ctx) {
 }
 
 // PORTING.md 14.2 (case T6: several fs sources, class N)
-export async function t6(impl, ctx) {
+async function t6(impl, ctx) {
   const root = ctx.args.root;
   const archive = ctx.create('tar');
   archive.file(path.join(root, 'a.txt'), { name: 'a.txt' });

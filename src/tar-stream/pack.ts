@@ -42,8 +42,6 @@ interface EncodableHeader extends Header {
 const DMODE = 0o755
 const FMODE = 0o644
 
-const END_OF_TAR = Buffer.alloc(1024)
-
 class Sink extends Writable {
   written: number
   header: EncodableHeader
@@ -233,10 +231,6 @@ class Pack extends Readable {
       return sink
     }
 
-    if (sink._isVoid) {
-      return sink
-    }
-
     return sink
   }
 
@@ -321,7 +315,7 @@ export default function pack (opts?: ReadableOptions) {
   return new Pack(opts)
 }
 
-export type { Pack, Sink, Header }
+export type { Pack }
 
 // deps/tar-stream/pack.js:266
 function modeToType (mode: number) {

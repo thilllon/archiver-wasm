@@ -31,7 +31,7 @@ mod tests {
                 size: 16384
             }
         );
-        assert_eq!(whole.crc32, crc32::unsigned(&source));
+        assert_eq!(whole.crc32, crc32::buf(&source, 0));
         for split in [0usize, 1, 19, 8192, 16383, 16384] {
             let (a, b) = source.split_at(split);
             let first = append(JsonEntry::default(), a);

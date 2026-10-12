@@ -57,7 +57,6 @@ jobs:
         with:
           path: |
             ~/.cargo/registry
-            ~/.cargo/git
             ~/.cache/.wasm-pack
             ~/Library/Caches/.wasm-pack
           key: cargo-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock') }}

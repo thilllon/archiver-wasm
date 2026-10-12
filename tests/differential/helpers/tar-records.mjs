@@ -10,14 +10,14 @@
 //               checksumValid, typeflag, linkname, magic, version, uname, gname, devmajor, devminor, prefix }
 //     pax:    null, or { header, records: [{ length, key, value, bytes }], values, body, padding }
 //             for the pax header block and the record blocks in front of the real header
-//   splitGzip(buffer) -> { header, deflated, payload, trailer, crc, size }   one gzip member (tar.gz)
+//   splitGzip(buffer) -> { header, payload, trailer, crc, size }   one gzip member (tar.gz)
 
 import zlib from 'node:zlib';
 
-export const BLOCK = 512;
+const BLOCK = 512;
 
 // offset, width (17.3)
-export const FIELDS = {
+const FIELDS = {
   name: [0, 100],
   mode: [100, 8],
   uid: [108, 8],
@@ -180,7 +180,6 @@ export function splitGzip(input) {
   const trailer = buffer.subarray(buffer.length - 8);
   return {
     header,
-    deflated,
     payload: zlib.inflateRawSync(deflated),
     trailer,
     crc: trailer.readUInt32LE(0),

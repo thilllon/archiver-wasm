@@ -48,9 +48,6 @@ impl fmt::Display for ZipError {
     }
 }
 
-impl std::error::Error for DeflateError {}
-impl std::error::Error for ZipError {}
-
 impl From<DeflateError> for ZipError {
     fn from(e: DeflateError) -> Self {
         ZipError::Deflate(e.0)

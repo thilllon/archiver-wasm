@@ -20,7 +20,7 @@ var STRONG_ENCRYPTION_FLAG = 1 << 6;
 var UFT8_NAMES_FLAG = 1 << 11;
 
 /** A plain copy of every WasmZipEntryInfo getter (PORTING.md 7.6). */
-export interface ZipEntryInfo {
+interface ZipEntryInfo {
   name: string;
   size: number;
   csize: number;
@@ -40,7 +40,7 @@ export interface ZipEntryInfo {
 }
 
 // deps/compress-commons/lib/archivers/zip/util.js:2-16 (the getter selection of dateToDos; the packing is Rust, PORTING.md 10.5)
-export function dateFields(d: Date, forceLocalTime?: boolean): DateFields {
+function dateFields(d: Date, forceLocalTime?: boolean): DateFields {
   forceLocalTime = forceLocalTime || false;
   var year = forceLocalTime ? d.getFullYear() : d.getUTCFullYear();
   var val = {

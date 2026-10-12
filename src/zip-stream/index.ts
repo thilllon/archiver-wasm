@@ -4,7 +4,7 @@ import { dateify, sanitizePath } from "./utils.js";
 import type { ArchiverOptions, ModuleCallback } from "../types.js";
 
 /** Entry data of deps/zip-stream/index.js:56-67: the defaulted keys, every other key passes through. */
-export interface ZipEntryData {
+interface ZipEntryData {
   type?: string;
   name?: string | null;
   namePrependSlash?: boolean;

@@ -6,8 +6,6 @@ import { MAX_CHUNK, toBuffer, wasm } from '../../wasm.js';
 import type { WasmDecryptoStream } from '../../wasm-types.js';
 import { CryptoCipher } from './crypto-cipher.js';
 
-const HEADER_LENGTH = 12;
-
 /**
  * Transform stream that encodes data with CryptoCipher
  */

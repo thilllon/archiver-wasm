@@ -1,5 +1,4 @@
 import { PassThrough } from 'node:stream';
-import type { TransformOptions } from 'node:stream';
 
 // Patch the given method of instance so that the callback
 // is executed once, before the actual method is called the
@@ -15,11 +14,11 @@ function beforeFirstCall(instance: Readable, method: '_read', callback: (this: R
 
 // node-archiver/node_modules/lazystream/lib/lazystream.js:23
 export class Readable extends PassThrough {
-  constructor(fn: (options?: TransformOptions) => NodeJS.ReadableStream, options?: TransformOptions) {
-    super({ ...options, autoDestroy: false, emitClose: false });   // PORTING.md V9
+  constructor(fn: () => NodeJS.ReadableStream) {
+    super({ autoDestroy: false, emitClose: false });   // PORTING.md V9
 
     beforeFirstCall(this, '_read', function() {
-      var source = fn.call(this, options);
+      var source = fn.call(this);
       var emit = this.emit.bind(this, 'error');
       source.on('error', emit);
       source.pipe(this);

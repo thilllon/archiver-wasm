@@ -813,7 +813,7 @@ mod tests {
         assert_eq!(zip._archive.central_offset, 224);
         assert_eq!(zip._archive.central_length, 216);
         // PORTING.md V5
-        assert_eq!(zip.get_bytes_written(), 472);
+        assert_eq!(zip.offset, 472);
 
         // buffer, deflate: version 20, descriptor, zeros in the local header
         let payload: Vec<u8> = (0..4000).map(|i| b'a' + (i % 7) as u8).collect();
@@ -913,7 +913,7 @@ mod tests {
         archive.extend_from_slice(&zip.take_output());
         assert_eq!(archive, hex(BIG));
         assert!(zip.is_zip64());
-        assert_eq!(zip.get_bytes_written(), 240 + 0x1_0000_0000);
+        assert_eq!(zip.offset, 240 + 0x1_0000_0000);
     }
 
     #[test]
@@ -928,7 +928,7 @@ mod tests {
         assert!(zip.is_zip64());
         zip.finish();
         assert_eq!(zip.take_output(), hex(FORCE64));
-        assert_eq!(zip.get_bytes_written(), 98);
+        assert_eq!(zip.offset, 98);
     }
 
     #[test]

@@ -60,8 +60,8 @@ function getStat(file: fs.PathLike, followSymlinks: boolean): Promise<fs.Stats |
   });
 }
 
-export type Stat = fs.Dirent | fs.Stats;
-export type Match = {
+type Stat = fs.Dirent | fs.Stats;
+type Match = {
   relative: string,
   absolute: string,
   stat?: Stat
@@ -203,10 +203,8 @@ function readOptions(options: Options) : StrictOptions {
   };
 }
 
-export type Callback = (err: Error | null, matches?: readonly string[]) => void;
-
 // deps/readdir-glob/src/index.ts:203-336
-export class ReaddirGlob extends EventEmitter<{
+class ReaddirGlob extends EventEmitter<{
   match: [Match],
   end: [],
   error: [NodeJS.ErrnoException]
@@ -224,13 +222,8 @@ export class ReaddirGlob extends EventEmitter<{
   private iterator: ReturnType<typeof explore>;
 
   // deps/readdir-glob/src/index.ts:220-272
-  constructor(cwd?: string, options?: Options |  Callback, cb?: Callback) {
+  constructor(cwd?: string, options?: Options) {
     super();
-    if(typeof options === 'function') {
-      cb = options;
-      options = undefined;
-    }
-
     this.options = readOptions(options || {});
   
     this.matchers = [];
@@ -267,14 +260,6 @@ export class ReaddirGlob extends EventEmitter<{
     this.inactive = false;
     this.aborted = false;
   
-    if(cb) {
-      const nonNullCb = cb;
-      const matches: string[] = [];
-      this.on('match', match => matches.push(this.options.absolute ? match.absolute : match.relative));
-      this.on('error', err => nonNullCb(err));
-      this.on('end', () => nonNullCb(null, matches));
-    }
-
     setTimeout( () => this._next() );
   }
 
@@ -349,13 +334,13 @@ export class ReaddirGlob extends EventEmitter<{
 }
 
 interface readdirGlobInterface {
-  (pattern?: string, options?: Options | Callback, cb?: Callback): ReaddirGlob;
+  (pattern?: string, options?: Options): ReaddirGlob;
   ReaddirGlob: typeof ReaddirGlob;
 }
 
 // deps/readdir-glob/src/index.ts:343-344
-export const readdirGlob: readdirGlobInterface = (pattern?: string, options?: Options | Callback, cb?: Callback) =>
-  new ReaddirGlob(pattern, options, cb);
+const readdirGlob: readdirGlobInterface = (pattern?: string, options?: Options) =>
+  new ReaddirGlob(pattern, options);
 
 readdirGlob.ReaddirGlob = ReaddirGlob;
 

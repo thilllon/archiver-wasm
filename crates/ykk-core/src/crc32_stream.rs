@@ -74,11 +74,6 @@ impl CRC32Stream {
         self.checksum.to_be_bytes()
     }
 
-    // deps/crc32-stream/lib/crc32-stream.js:23-25
-    pub fn hex(&self) -> String {
-        format!("{:08X}", self.checksum)
-    }
-
     // deps/crc32-stream/lib/crc32-stream.js:26-28
     pub fn size(&self, _compressed: bool) -> u64 {
         self.raw_size
@@ -130,11 +125,6 @@ impl DeflateCRC32Stream {
     // deps/crc32-stream/lib/deflate-crc32-stream.js:25-29
     pub fn digest(&self) -> [u8; 4] {
         self.checksum.to_be_bytes()
-    }
-
-    // deps/crc32-stream/lib/deflate-crc32-stream.js:30-32
-    pub fn hex(&self) -> String {
-        format!("{:08X}", self.checksum)
     }
 
     // deps/crc32-stream/lib/deflate-crc32-stream.js:33-39
@@ -262,7 +252,6 @@ mod tests {
         assert_eq!(out.get(..2), Some(&[0xAA, 0xBB][..]));
         assert_eq!(stream.compressed_size, out.len() as u64 - 2);
         assert_eq!(inflate(&out[2..]), b"this is a text file");
-        assert_eq!(stream.hex(), "22E53327");
         assert_eq!(stream.digest(), [0x22, 0xE5, 0x33, 0x27]);
     }
 
@@ -270,7 +259,6 @@ mod tests {
     fn crc32_stream_passthrough() {
         let mut stream = CRC32Stream::new();
         assert_eq!(stream.digest(), [0, 0, 0, 0]);
-        assert_eq!(stream.hex(), "00000000");
         let mut out = vec![1u8];
         stream._transform(b"this is ", &mut out);
         stream._transform(b"a text file", &mut out);
@@ -280,6 +268,5 @@ mod tests {
         assert_eq!(stream.size(false), 19);
         assert_eq!(stream.size(true), 19);
         assert_eq!(stream.digest(), 585446183u32.to_be_bytes());
-        assert_eq!(stream.hex(), "22E53327");
     }
 }

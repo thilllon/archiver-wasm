@@ -1,11 +1,9 @@
 // Port of deps/compress-commons/lib/archivers/zip/zip-archive-entry.js.
-use super::archive_entry::ArchiveEntry;
 use super::constants::{
-    EMPTY, MIN_VERSION_INITIAL, MODE_MASK, PLATFORM_FAT, PLATFORM_UNIX, SHORT_MASK, SHORT_SHIFT,
-    S_DOS_A, S_DOS_D, S_IFDIR, S_IFREG, ZIP64_MAGIC,
+    EMPTY, MIN_VERSION_INITIAL, MODE_MASK, PLATFORM_FAT, PLATFORM_UNIX, SHORT_SHIFT, S_DOS_A,
+    S_DOS_D, S_IFDIR, S_IFREG, ZIP64_MAGIC,
 };
 use super::general_purpose_bit::GeneralPurposeBit;
-use super::unix_stat;
 use super::util::{date_to_dos, dos_to_date, DateFields};
 use super::utils::sanitize_path;
 
@@ -107,11 +105,6 @@ impl ZipArchiveEntry {
         self.inattr
     }
 
-    // deps/compress-commons/lib/archivers/zip/zip-archive-entry.js:121-123
-    pub fn get_last_modified_date(&self) -> Option<DateFields> {
-        self.get_time()
-    }
-
     // deps/compress-commons/lib/archivers/zip/zip-archive-entry.js:130-132
     pub fn get_local_file_data_extra(&self) -> &[u8] {
         self.get_extra()
@@ -147,15 +140,6 @@ impl ZipArchiveEntry {
         self.time.unwrap_or(0)
     }
 
-    // deps/compress-commons/lib/archivers/zip/zip-archive-entry.js:189-193
-    pub fn get_unix_mode(&self) -> u32 {
-        if self.platform != PLATFORM_UNIX {
-            0
-        } else {
-            (self.get_external_attributes() >> SHORT_SHIFT) & SHORT_MASK
-        }
-    }
-
     // deps/compress-commons/lib/archivers/zip/zip-archive-entry.js:199-201
     pub fn get_version_needed_to_extract(&self) -> u16 {
         self.minver
@@ -189,16 +173,6 @@ impl ZipArchiveEntry {
         self.extra = Some(extra);
     }
 
-    // deps/compress-commons/lib/archivers/zip/zip-archive-entry.js:256-261 (PORTING.md V7)
-    pub fn set_general_purpose_bit(&mut self, gpb: GeneralPurposeBit) {
-        self.gpb = gpb;
-    }
-
-    // deps/compress-commons/lib/archivers/zip/zip-archive-entry.js:267-269
-    pub fn set_internal_attributes(&mut self, attr: u16) {
-        self.inattr = attr;
-    }
-
     // deps/compress-commons/lib/archivers/zip/zip-archive-entry.js:275-280 (PORTING.md V7)
     pub fn set_method(&mut self, method: u16) {
         self.method = Some(method);
@@ -214,11 +188,6 @@ impl ZipArchiveEntry {
             self.get_general_purpose_bit_mut().use_utf8_for_names(true);
         }
         self.name = Some(name);
-    }
-
-    // deps/compress-commons/lib/archivers/zip/zip-archive-entry.js:304-306
-    pub fn set_platform(&mut self, platform: u8) {
-        self.platform = platform;
     }
 
     // deps/compress-commons/lib/archivers/zip/zip-archive-entry.js:312-317 (PORTING.md V7)
@@ -260,37 +229,9 @@ impl ZipArchiveEntry {
         self.get_name().is_some_and(|name| name.ends_with('/'))
     }
 
-    // deps/compress-commons/lib/archivers/zip/zip-archive-entry.js:366-370
-    pub fn is_unix_symlink(&self) -> bool {
-        (self.get_unix_mode() & unix_stat::FILE_TYPE_FLAG) == unix_stat::LINK_FLAG
-    }
-
     // deps/compress-commons/lib/archivers/zip/zip-archive-entry.js:377-379
     pub fn is_zip64(&self) -> bool {
         self.csize > ZIP64_MAGIC || self.size > ZIP64_MAGIC
-    }
-}
-
-// deps/compress-commons/lib/archivers/zip/zip-archive-entry.js:22 (extends ArchiveEntry)
-impl ArchiveEntry for ZipArchiveEntry {
-    // deps/compress-commons/lib/archivers/zip/zip-archive-entry.js:148-150 (override of deps/compress-commons/lib/archivers/archive-entry.js:2)
-    fn get_name(&self) -> Option<&str> {
-        ZipArchiveEntry::get_name(self)
-    }
-
-    // deps/compress-commons/lib/archivers/zip/zip-archive-entry.js:165-167 (override of deps/compress-commons/lib/archivers/archive-entry.js:3)
-    fn get_size(&self) -> u64 {
-        ZipArchiveEntry::get_size(self)
-    }
-
-    // deps/compress-commons/lib/archivers/zip/zip-archive-entry.js:121-123 (override of deps/compress-commons/lib/archivers/archive-entry.js:4)
-    fn get_last_modified_date(&self) -> Option<DateFields> {
-        ZipArchiveEntry::get_last_modified_date(self)
-    }
-
-    // deps/compress-commons/lib/archivers/zip/zip-archive-entry.js:356-358 (override of deps/compress-commons/lib/archivers/archive-entry.js:5)
-    fn is_directory(&self) -> bool {
-        ZipArchiveEntry::is_directory(self)
     }
 }
 
@@ -299,7 +240,6 @@ impl ArchiveEntry for ZipArchiveEntry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::zip::constants::{EXT_FILE_ATTR_DIR, EXT_FILE_ATTR_FILE};
 
     fn with_mode(name: &str, mode: i32) -> ZipArchiveEntry {
         let mut entry = ZipArchiveEntry::new(Some(name));
@@ -313,11 +253,8 @@ mod tests {
         let entry = with_mode("a.txt", 420);
         assert_eq!(entry.get_external_attributes(), 0x81A40020);
         assert_eq!(entry.get_external_attributes(), 2175008800);
-        assert_eq!(entry.get_external_attributes(), EXT_FILE_ATTR_FILE);
         assert_eq!(entry.mode, Some(420));
         assert_eq!(entry.get_platform(), PLATFORM_UNIX);
-        assert_eq!(entry.get_unix_mode(), 33188);
-        assert!(!entry.is_unix_symlink());
 
         // file 0777
         let entry = with_mode("executable.sh", 511);
@@ -330,18 +267,14 @@ mod tests {
         let entry = with_mode("directory/subdir/", 493);
         assert_eq!(entry.get_external_attributes(), 0x41ED0010);
         assert_eq!(entry.get_external_attributes(), 1106051088);
-        assert_eq!(entry.get_external_attributes(), EXT_FILE_ATTR_DIR);
         assert_eq!((entry.get_external_attributes() >> 16) & 0xfff, 493);
         assert_eq!(entry.mode, Some(493));
-        assert_eq!(entry.get_unix_mode(), 16877);
 
         // symlink with no permission bits
         let entry = with_mode("manual-link.txt", 40960);
         assert_eq!(entry.get_external_attributes(), 0xA0000020);
         assert_eq!(entry.get_external_attributes(), 2684354592);
         assert_eq!(entry.mode, Some(0));
-        assert_eq!(entry.get_unix_mode(), 40960);
-        assert!(entry.is_unix_symlink());
     }
 
     #[test]
@@ -349,19 +282,15 @@ mod tests {
         // a symlink named like a directory: 0xA000 | 0x4000, DOS directory bit
         let entry = with_mode("x/", 40960);
         assert_eq!(entry.get_external_attributes(), 3758096400);
-        assert_eq!(entry.get_unix_mode(), 57344);
-        assert!(!entry.is_unix_symlink());
 
         // setuid survives in `mode`
         let entry = with_mode("a", 0o104755);
         assert_eq!(entry.get_external_attributes(), 2314010656);
         assert_eq!(entry.mode, Some(2541));
-        assert_eq!(entry.get_unix_mode(), 35309);
 
         let entry = with_mode("a", -1);
         assert_eq!(entry.get_external_attributes(), 4294901792);
         assert_eq!(entry.mode, Some(4095));
-        assert_eq!(entry.get_unix_mode(), 65535);
 
         // bits above the low 16 fall off the top of the shift
         let entry = with_mode("a", 65536 + 420);
@@ -382,7 +311,6 @@ mod tests {
         assert_eq!(entry.get_crc(), 0);
         assert_eq!(entry.time, None);
         assert_eq!(entry.get_time(), None);
-        assert_eq!(entry.get_last_modified_date(), None);
         assert_eq!(entry.get_time_dos(), 0);
         assert_eq!(entry.get_version_needed_to_extract(), 10);
         assert_eq!(entry.mode, None);
@@ -395,8 +323,6 @@ mod tests {
         assert_eq!(entry.comment, None);
         assert_eq!(entry.get_comment(), "");
         assert_eq!(entry._offsets, Offsets::default());
-        assert_eq!(entry.get_unix_mode(), 0);
-        assert!(!entry.is_unix_symlink());
         assert!(!entry.is_zip64());
         assert!(!entry.is_directory());
     }
@@ -427,7 +353,7 @@ mod tests {
             let entry = ZipArchiveEntry::new(Some(input));
             assert_eq!(entry.get_name(), Some(plain), "{input:?}");
             assert_eq!(
-                entry.get_general_purpose_bit().uses_utf8_for_names(),
+                entry.get_general_purpose_bit().utf8,
                 !plain.is_ascii(),
                 "{input:?}"
             );
@@ -436,7 +362,7 @@ mod tests {
             entry.set_name(input, true);
             assert_eq!(entry.get_name(), Some(slashed), "{input:?}");
             assert_eq!(
-                entry.get_general_purpose_bit().uses_utf8_for_names(),
+                entry.get_general_purpose_bit().utf8,
                 !slashed.is_ascii(),
                 "{input:?}"
             );
@@ -453,16 +379,16 @@ mod tests {
         let mut entry = ZipArchiveEntry::new(Some("é"));
         entry.set_name("a", false);
         assert_eq!(entry.get_name(), Some("a"));
-        assert!(entry.get_general_purpose_bit().uses_utf8_for_names());
+        assert!(entry.get_general_purpose_bit().utf8);
 
         let mut entry = ZipArchiveEntry::new(Some("a"));
-        assert!(!entry.get_general_purpose_bit().uses_utf8_for_names());
+        assert!(!entry.get_general_purpose_bit().utf8);
         entry.set_comment("ü");
         assert_eq!(entry.get_comment(), "ü");
-        assert!(entry.get_general_purpose_bit().uses_utf8_for_names());
+        assert!(entry.get_general_purpose_bit().utf8);
         entry.set_comment("x");
         assert_eq!(entry.get_comment(), "x");
-        assert!(entry.get_general_purpose_bit().uses_utf8_for_names());
+        assert!(entry.get_general_purpose_bit().utf8);
     }
 
     #[test]
@@ -488,7 +414,6 @@ mod tests {
             seconds: 38.0,
         });
         assert_eq!(entry.get_time(), expected);
-        assert_eq!(entry.get_last_modified_date(), expected);
 
         // an Invalid Date is accepted and packs to 0, which is a set time
         entry.set_time(&DateFields {
@@ -520,18 +445,6 @@ mod tests {
     }
 
     #[test]
-    fn unix_mode_needs_the_unix_platform() {
-        let mut entry = ZipArchiveEntry::new(Some("a"));
-        entry.set_external_attributes(2684354592);
-        assert_eq!(entry.get_external_attributes(), 2684354592);
-        assert_eq!(entry.get_unix_mode(), 0);
-        assert!(!entry.is_unix_symlink());
-        entry.set_platform(PLATFORM_UNIX);
-        assert_eq!(entry.get_unix_mode(), 40960);
-        assert!(entry.is_unix_symlink());
-    }
-
-    #[test]
     fn plain_setters() {
         let mut entry = ZipArchiveEntry::new(Some("a"));
         entry.set_method(8);
@@ -540,8 +453,6 @@ mod tests {
         assert_eq!(entry.get_method(), 99);
         entry.set_crc(0xffffffff);
         assert_eq!(entry.get_crc(), 4294967295);
-        entry.set_internal_attributes(1);
-        assert_eq!(entry.get_internal_attributes(), 1);
         entry.set_version_needed_to_extract(45);
         assert_eq!(entry.get_version_needed_to_extract(), 45);
         entry.set_extra(vec![1, 0, 0, 0]);
@@ -549,11 +460,11 @@ mod tests {
         assert_eq!(entry.get_local_file_data_extra(), [1, 0, 0, 0]);
         assert_eq!(entry.get_central_directory_extra(), [1, 0, 0, 0]);
 
-        let mut gpb = GeneralPurposeBit::new();
-        gpb.use_data_descriptor(true);
-        entry.set_general_purpose_bit(gpb);
+        entry
+            .get_general_purpose_bit_mut()
+            .use_data_descriptor(true);
         assert!(entry.get_general_purpose_bit().uses_data_descriptor());
         entry.get_general_purpose_bit_mut().use_encryption(true);
-        assert!(entry.get_general_purpose_bit().uses_encryption());
+        assert!(entry.get_general_purpose_bit().encryption);
     }
 }

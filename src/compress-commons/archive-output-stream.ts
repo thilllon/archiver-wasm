@@ -6,7 +6,7 @@ import { normalizeInputSource } from "./util.js";
 import type { ModuleCallback } from "../types.js";
 
 /** `_archive` of both classes: the three flags of archive-output-stream.js:12-16, and the keys zip-archive-output-stream.js:50-59 adds. */
-export interface ArchiveState {
+interface ArchiveState {
   finish: boolean;
   finished: boolean;
   processing: boolean;

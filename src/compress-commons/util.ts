@@ -14,7 +14,3 @@ export function normalizeInputSource(source: unknown): unknown {
   }
   return source;
 }
-
-export default {
-  normalizeInputSource,
-};

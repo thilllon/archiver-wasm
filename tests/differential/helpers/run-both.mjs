@@ -2,10 +2,9 @@
 // Scenario runner of the differential tests (PORTING.md 14.2).
 //
 //   runBoth(scenario, options)          -> { upstream, ykk }, run in this process, upstream first
-//   runOne(name, scenario, options)     -> { bytes, events, error, pointer, pointerAtEnd, settled, value, thrown }
+//   runOne(name, scenario, options)     -> { bytes, events, error, pointer, pointerAtEnd, settled, value }
 //   runBothInChild(reference, options)  -> { upstream, ykk }, each
 //                                          { code, signal, stdout, stderr, crash, unsettled, result }
-//   runChild(name, reference, options)
 //   scenarioReference(moduleUrl, exportName)   the <scenario> argument of `--child <impl> <scenario>`
 //   load(name)                          -> the implementation object a scenario receives
 //
@@ -42,7 +41,7 @@
 //   hang     milliseconds: wait that long after the scenario returned, take the result, then destroy
 //            every tracked stream (the hang cases)
 //   args     passed to the scenario as ctx.args (JSON in a child process)
-//   cwd, env, timeout    child process only; the child is killed after `timeout` (default 10000 ms, longer
+//   cwd, timeout    child process only; the child is killed after `timeout` (default 10000 ms, longer
 //            than mocha's default test timeout: pass one below the timeout of the test)
 //
 // A child prints its result as one JSON line (undefined, NaN and the infinities survive the round trip),
@@ -64,10 +63,10 @@ import { EVENTS, recordEvents, summarize, summarizeError } from './events.mjs';
 const require = createRequire(import.meta.url);
 const SELF = fileURLToPath(import.meta.url);
 
-export const ROOT = path.resolve(path.dirname(SELF), '../../..');
-export const IMPLEMENTATIONS = ['upstream', 'ykk'];
+const ROOT = path.resolve(path.dirname(SELF), '../../..');
+const IMPLEMENTATIONS = ['upstream', 'ykk'];
 export const CRASH_EXIT_CODE = 7;
-export const UNSETTLED_EXIT_CODE = 8;
+const UNSETTLED_EXIT_CODE = 8;
 export const HANG_QUIET_MS = 500;
 
 const ZIP20_HEADER_LENGTH = 12;
@@ -320,8 +319,6 @@ export async function runOne(name, scenario, options = {}) {
   const zip20Header = randomOption(options.random);
 
   const ctx = {
-    name,
-    impl,
     args: options.args,
     zip20Header,
     track(emitter, { events: names = EVENTS, data = true } = {}) {
@@ -401,7 +398,6 @@ export async function runOne(name, scenario, options = {}) {
       pointerAtEnd,
       settled: settled.slice(),
       value,
-      thrown,
     };
 
     if (options.hang !== undefined) {
@@ -481,14 +477,13 @@ function isResultLine(line) {
   return line !== null && typeof line === 'object' && !Array.isArray(line) && Object.hasOwn(line, 'result');
 }
 
-export function runChild(name, reference, options = {}) {
+function runChild(name, reference, options = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(
       process.execPath,
       [SELF, '--child', name, reference, JSON.stringify(childOptions(options))],
       {
         cwd: options.cwd === undefined ? process.cwd() : options.cwd,
-        env: options.env === undefined ? process.env : options.env,
         stdio: ['ignore', 'pipe', 'pipe'],
       }
     );
