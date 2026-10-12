@@ -1,6 +1,6 @@
 {
   "name": "archiver-wasm",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "node-archiver ported to Rust and WebAssembly, with ZIP encryption built in",
   "keywords": [
     "archiver",
