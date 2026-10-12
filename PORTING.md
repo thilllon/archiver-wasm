@@ -3976,7 +3976,7 @@ list has it added to V9 first, with both sides observed by running them (2.3, ru
 # crates/archiver-core/Cargo.toml
 [package]
 name = "archiver-core"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 
 [dependencies]
@@ -3991,7 +3991,7 @@ pbkdf2 = { version = "0.12", default-features = false, features = ["hmac"] }
 # crates/archiver-wasm/Cargo.toml
 [package]
 name = "archiver-wasm"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 
 [lib]
@@ -5040,7 +5040,7 @@ is the version that is published. The exact versions of `typescript`, `tsx` and
 ```json
 {
   "name": "archiver-wasm",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "node-archiver ported to Rust and WebAssembly, with ZIP encryption built in",
   "license": "MIT",
   "repository": { "type": "git", "url": "git+https://github.com/thilllon/archiver-wasm.git" },

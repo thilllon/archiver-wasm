@@ -21,7 +21,7 @@ dependencies = [
 
 [[package]]
 name = "archiver-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "aes",
  "crc32fast",
@@ -34,7 +34,7 @@ dependencies = [
 
 [[package]]
 name = "archiver-wasm"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "archiver-core",
  "wasm-bindgen",
