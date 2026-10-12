@@ -89,10 +89,10 @@ async function assertSameEntry(u, y) {
 }
 
 // PORTING.md 14.2 (comparison rules, deflated zip, class D; events: the exact sequence)
-async function assertSameZip(upstream, ykk) {
-  assert.deepStrictEqual(ykk.error, upstream.error);
+async function assertSameZip(upstream, port) {
+  assert.deepStrictEqual(port.error, upstream.error);
   const u = parseZip(upstream.bytes);
-  const y = parseZip(ykk.bytes);
+  const y = parseZip(port.bytes);
   assert.deepStrictEqual(y.entries.map((entry) => entry.name), u.entries.map((entry) => entry.name));
   for (let i = 0; i < u.entries.length; i++) {
     await assertSameEntry(u.entries[i], y.entries[i]);
@@ -101,20 +101,20 @@ async function assertSameZip(upstream, ykk) {
   assert.deepStrictEqual(maskEndRecords(y), maskEndRecords(u));
   assertEndRecords(u);
   assertEndRecords(y);
-  assert.deepStrictEqual(comparedEvents(ykk), comparedEvents(upstream));
+  assert.deepStrictEqual(comparedEvents(port), comparedEvents(upstream));
   return { u, y };
 }
 
 // PORTING.md 14.2 (comparison rules, stored encrypted zip: whole-archive byte equality, events, pointer)
-function assertSameBytes(upstream, ykk) {
-  assert.deepStrictEqual(ykk.error, upstream.error);
-  assert.deepStrictEqual(ykk.bytes, upstream.bytes);
-  assert.deepStrictEqual(comparedEvents(ykk), comparedEvents(upstream));
-  assert.equal(ykk.pointer, upstream.pointer);
-  if (ykk.pointer !== null) {
-    assert.equal(ykk.pointer, ykk.bytes.length);
+function assertSameBytes(upstream, port) {
+  assert.deepStrictEqual(port.error, upstream.error);
+  assert.deepStrictEqual(port.bytes, upstream.bytes);
+  assert.deepStrictEqual(comparedEvents(port), comparedEvents(upstream));
+  assert.equal(port.pointer, upstream.pointer);
+  if (port.pointer !== null) {
+    assert.equal(port.pointer, port.bytes.length);
   }
-  return { u: parseZip(upstream.bytes), y: parseZip(ykk.bytes) };
+  return { u: parseZip(upstream.bytes), y: parseZip(port.bytes) };
 }
 
 // PORTING.md 14.2 (helper of the test: the entries of both archives, for an assertion made on each)
@@ -134,8 +134,8 @@ describe('differential: zip (zip20)', function () {
     };
 
     it('stored', async function () {
-      const { upstream, ykk } = await runBoth(zip20(() => ({ store: true }), add), { random: ZIP20_HEADER });
-      const zips = assertSameBytes(upstream, ykk);
+      const { upstream, port } = await runBoth(zip20(() => ({ store: true }), add), { random: ZIP20_HEADER });
+      const zips = assertSameBytes(upstream, port);
       const entries = zips.y.entries;
       for (const entry of entries) {
         await assertSizes(entry);
@@ -157,8 +157,8 @@ describe('differential: zip (zip20)', function () {
     });
 
     it('deflated', async function () {
-      const { upstream, ykk } = await runBoth(zip20(() => ({}), add), { random: ZIP20_HEADER });
-      const zips = await assertSameZip(upstream, ykk);
+      const { upstream, port } = await runBoth(zip20(() => ({}), add), { random: ZIP20_HEADER });
+      const zips = await assertSameZip(upstream, port);
       for (const parsed of both(zips)) {
         const entries = parsed.entries;
         assert.deepStrictEqual(entries.map((entry) => entry.central.method), [8, 8, 8, 8, 0, 8]);
@@ -172,19 +172,19 @@ describe('differential: zip (zip20)', function () {
     });
 
     it('deflated, zlib.level 9', async function () {
-      const { upstream, ykk } = await runBoth(zip20(() => ({ zlib: { level: 9 } }), add), { random: ZIP20_HEADER });
-      await assertSameZip(upstream, ykk);
+      const { upstream, port } = await runBoth(zip20(() => ({ zlib: { level: 9 } }), add), { random: ZIP20_HEADER });
+      await assertSameZip(upstream, port);
     });
 
     it('stored, with comments, non-ASCII names and forceZip64', async function () {
-      const { upstream, ykk } = await runBoth(
+      const { upstream, port } = await runBoth(
         zip20(() => ({ store: true, forceZip64: true, comment: 'archive ü' }), (archive) => {
           archive.append(TEXT, { name: 'é.txt', date: DATE, comment: 'ü comment' });
           archive.append(streamOf([TEXT]), { name: 'plain.txt', date: DATE, mode: 0o600 });
         }),
         { random: ZIP20_HEADER }
       );
-      const zips = assertSameBytes(upstream, ykk);
+      const zips = assertSameBytes(upstream, port);
       assert.notEqual(zips.y.zip64End, null);
       assert.deepStrictEqual(zips.y.entries.map((entry) => entry.central.flags), [0x0801, 0x0001]);
     });
@@ -203,16 +203,16 @@ describe('differential: zip (zip20)', function () {
 
     for (const [title, zip20Header] of wrong) {
       it(`zip20Header: ${title} throws`, async function () {
-        const ykk = await load('ykk');
+        const port = await load('port');
         const expected = { name: 'TypeError', message: 'zip20Header must be a Buffer of 12 bytes' };
-        assert.throws(() => new ykk.ZipCryptoStream({ password: PASSWORD, zip20Header }), expected);
-        assert.throws(() => ykk.ZipCryptoStream({ password: PASSWORD, zip20Header }), expected);
+        assert.throws(() => new port.ZipCryptoStream({ password: PASSWORD, zip20Header }), expected);
+        assert.throws(() => port.ZipCryptoStream({ password: PASSWORD, zip20Header }), expected);
         assert.throws(
-          () => new ykk.ZipEncrypted({ password: PASSWORD, encryptionMethod: 'zip20', zip20Header }),
+          () => new port.ZipEncrypted({ password: PASSWORD, encryptionMethod: 'zip20', zip20Header }),
           expected
         );
         assert.throws(
-          () => ykk.archiver.create('zip-encrypted', { password: PASSWORD, encryptionMethod: 'zip20', zip20Header }),
+          () => port.archiver.create('zip-encrypted', { password: PASSWORD, encryptionMethod: 'zip20', zip20Header }),
           expected
         );
         // upstream has no such option (V10)
@@ -223,14 +223,14 @@ describe('differential: zip (zip20)', function () {
 
     for (const [title, zip20Header] of [['undefined', undefined], ['null', null], ['a Buffer of 12 bytes', ZIP20_HEADER]]) {
       it(`zip20Header: ${title} is accepted`, async function () {
-        const ykk = await load('ykk');
-        new ykk.ZipCryptoStream({ password: PASSWORD, zip20Header }).destroy();
+        const port = await load('port');
+        new port.ZipCryptoStream({ password: PASSWORD, zip20Header }).destroy();
       });
     }
 
     for (const store of [true, false]) {
       it(`write('PREFIX'), then one entry, then finalize(): ${store ? 'stored' : 'default method'}`, async function () {
-        const { upstream, ykk } = await runBoth(
+        const { upstream, port } = await runBoth(
           async (impl, ctx) => {
             const engine = ctx.track(
               new impl.ZipCryptoStream({ password: PASSWORD, store, zip20Header: Buffer.from(ctx.zip20Header) })
@@ -245,7 +245,7 @@ describe('differential: zip (zip20)', function () {
           },
           { random: ZIP20_HEADER }
         );
-        const zips = store ? assertSameBytes(upstream, ykk) : await assertSameZip(upstream, ykk);
+        const zips = store ? assertSameBytes(upstream, port) : await assertSameZip(upstream, port);
         for (const parsed of both(zips)) {
           assert.deepStrictEqual(parsed.prefix, Buffer.from('PREFIX'));
           assert.equal(parsed.entries[0].central.localHeaderOffset, 6);
@@ -257,7 +257,7 @@ describe('differential: zip (zip20)', function () {
     }
 
     it('written to and ended without an entry: the bytes pass through', async function () {
-      const { upstream, ykk } = await runBoth(async (impl, ctx) => {
+      const { upstream, port } = await runBoth(async (impl, ctx) => {
         const engine = ctx.track(new impl.ZipCryptoStream({ password: PASSWORD, encryptionMethod: 'zip20' }));
         const ended = once(engine, 'end');
         engine.write(TEXT.subarray(0, 7));
@@ -265,7 +265,7 @@ describe('differential: zip (zip20)', function () {
         await ended;
       });
       assert.deepStrictEqual(upstream.bytes, TEXT);
-      assert.deepStrictEqual(ykk.bytes, upstream.bytes);
+      assert.deepStrictEqual(port.bytes, upstream.bytes);
     });
   });
 });

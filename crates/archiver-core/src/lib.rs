@@ -1,4 +1,4 @@
-// crates/ykk-core/src/lib.rs
+// crates/archiver-core/src/lib.rs
 #![forbid(unsafe_code)]
 pub mod crc32;
 pub mod crc32_stream;

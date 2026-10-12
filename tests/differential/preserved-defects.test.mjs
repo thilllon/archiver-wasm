@@ -138,24 +138,24 @@ function ordered(value) {
 }
 
 // PORTING.md 14.2 (helper of the test: the scenario function itself returned on both implementations)
-function assertRan({ upstream, ykk }) {
+function assertRan({ upstream, port }) {
   assert.equal(upstream.error, null, 'upstream: the scenario threw');
-  assert.equal(ykk.error, null, 'ykk: the scenario threw');
+  assert.equal(port.error, null, 'port: the scenario threw');
 }
 
 // PORTING.md 14.2 (hangs: the quiet time is over and neither has settled the promise; the events are equal)
 function assertHang(runs) {
   assertRan(runs);
   assert.deepStrictEqual(runs.upstream.settled, [], 'upstream settled the finalize() promise');
-  assert.deepStrictEqual(runs.ykk.settled, [], 'ykk settled the finalize() promise');
-  assert.deepStrictEqual(runs.ykk.events, runs.upstream.events);
-  assert.equal(ordered(runs.ykk.events), ordered(runs.upstream.events), 'key order of the event payloads');
+  assert.deepStrictEqual(runs.port.settled, [], 'port settled the finalize() promise');
+  assert.deepStrictEqual(runs.port.events, runs.upstream.events);
+  assert.equal(ordered(runs.port.events), ordered(runs.upstream.events), 'key order of the event payloads');
 }
 
 // PORTING.md 14.2 (hangs: neither has emitted `end` / `close`)
 function assertNeverEnded(runs) {
   assert.deepStrictEqual(selectEvents(runs.upstream.events, ['end', 'close']), []);
-  assert.deepStrictEqual(selectEvents(runs.ykk.events, ['end', 'close']), []);
+  assert.deepStrictEqual(selectEvents(runs.port.events, ['end', 'close']), []);
 }
 
 // PORTING.md 14.2 (crashes: exit code 7 and the printed { name, code, message } are compared)
@@ -164,8 +164,8 @@ function assertSameCrash(runs, expected) {
   assert.equal(runs.upstream.crash.name, expected.name);
   assert.equal(runs.upstream.crash.code, expected.code);
   assert.equal(runs.upstream.crash.message, expected.message);
-  assert.equal(runs.ykk.code, runs.upstream.code, `ykk did not crash: ${runs.ykk.stdout}${runs.ykk.stderr}`);
-  assert.deepStrictEqual(runs.ykk.crash, runs.upstream.crash);
+  assert.equal(runs.port.code, runs.upstream.code, `port did not crash: ${runs.port.stdout}${runs.port.stderr}`);
+  assert.deepStrictEqual(runs.port.crash, runs.upstream.crash);
 }
 
 describe('differential: preserved defects (PORTING.md 14.2, D1 to D8)', () => {
@@ -191,8 +191,8 @@ describe('differential: preserved defects (PORTING.md 14.2, D1 to D8)', () => {
 
   before(async () => {
     await load('upstream');
-    await load('ykk');
-    root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'ykk-diff-defects-')));
+    await load('port');
+    root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'archiver-wasm-diff-defects-')));
   });
 
   after(() => {
@@ -281,7 +281,7 @@ describe('differential: preserved defects (PORTING.md 14.2, D1 to D8)', () => {
       assert.equal(events[0].payload.type, 'directory');
       assert.equal(events[2].payload.code, 'EACCES');
       assert.equal(events[2].payload.message, `EACCES: permission denied, scandir '${path.join(dir, 'sub')}'`);
-      assert.ok(runs.ykk.bytes.equals(runs.upstream.bytes), 'the bytes written before the hang differ');
+      assert.ok(runs.port.bytes.equals(runs.upstream.bytes), 'the bytes written before the hang differ');
     });
   });
 
@@ -300,8 +300,8 @@ describe('differential: preserved defects (PORTING.md 14.2, D1 to D8)', () => {
         ['end', 'close']
       );
       assert.equal(runs.upstream.bytes.length, 0);
-      assert.deepStrictEqual(runs.ykk.value, runs.upstream.value);
-      assert.equal(runs.ykk.bytes.length, 0);
+      assert.deepStrictEqual(runs.port.value, runs.upstream.value);
+      assert.equal(runs.port.bytes.length, 0);
     });
   });
 
@@ -322,11 +322,11 @@ describe('differential: preserved defects (PORTING.md 14.2, D1 to D8)', () => {
         assert.equal(settled[1].args[1].size, 6);
         assert.deepStrictEqual(runs.upstream.value, { returned: undefined });
         assert.deepStrictEqual(runs.upstream.events, []);
-        assert.deepStrictEqual(runs.ykk.settled, runs.upstream.settled);
-        assert.equal(ordered(runs.ykk.settled), ordered(runs.upstream.settled), `${format}: key order of the callback arguments`);
-        assert.deepStrictEqual(runs.ykk.value, runs.upstream.value);
-        assert.deepStrictEqual(runs.ykk.events, runs.upstream.events);
-        assert.ok(runs.ykk.bytes.equals(runs.upstream.bytes), `${format}: the bytes written by the plugin differ`);
+        assert.deepStrictEqual(runs.port.settled, runs.upstream.settled);
+        assert.equal(ordered(runs.port.settled), ordered(runs.upstream.settled), `${format}: key order of the callback arguments`);
+        assert.deepStrictEqual(runs.port.value, runs.upstream.value);
+        assert.deepStrictEqual(runs.port.events, runs.upstream.events);
+        assert.ok(runs.port.bytes.equals(runs.upstream.bytes), `${format}: the bytes written by the plugin differ`);
       });
     }
   });
@@ -359,8 +359,8 @@ describe('differential: preserved defects (PORTING.md 14.2, D1 to D8)', () => {
       assert.equal(runs.upstream.value.thrown.message, `ENOENT: no such file or directory, readlink '${link}'`);
       assert.equal(runs.upstream.value.entriesCount, 1);
       assert.deepStrictEqual(runs.upstream.events, []);
-      assert.deepStrictEqual(runs.ykk.value, runs.upstream.value);
-      assert.deepStrictEqual(runs.ykk.events, runs.upstream.events);
+      assert.deepStrictEqual(runs.port.value, runs.upstream.value);
+      assert.deepStrictEqual(runs.port.events, runs.upstream.events);
     });
 
     it('the stat queue: an uncaught exception out of the lstat callback', async () => {

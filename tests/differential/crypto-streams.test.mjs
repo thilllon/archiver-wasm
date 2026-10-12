@@ -103,11 +103,11 @@ async function drive(stream, chunks) {
 // PORTING.md 14.2 (the same stream of each implementation, upstream first, under the same random bytes)
 async function driveBoth(make, chunks, random = SALT) {
   const upstream = await withRandom(random, async () => drive(make(await load('upstream')), chunks));
-  const ykk = await withRandom(random, async () => drive(make(await load('ykk')), chunks));
-  assert.deepStrictEqual(ykk.steps, upstream.steps);
-  assert.deepStrictEqual(ykk.randomBytes, upstream.randomBytes);
-  assertBytes(ykk.bytes, upstream.bytes);
-  return { upstream, ykk };
+  const port = await withRandom(random, async () => drive(make(await load('port')), chunks));
+  assert.deepStrictEqual(port.steps, upstream.steps);
+  assert.deepStrictEqual(port.randomBytes, upstream.randomBytes);
+  assertBytes(port.bytes, upstream.bytes);
+  return { upstream, port };
 }
 
 // PORTING.md 12.3 (7z is a prerequisite on PATH; p7zip reads its arguments in the encoding of the locale)
@@ -125,13 +125,13 @@ function comparedEvents(run) {
 }
 
 // PORTING.md 14.2 (comparison rules, stored encrypted zip: whole-archive byte equality, events, pointer)
-function assertSameBytes(upstream, ykk) {
-  assert.deepStrictEqual(ykk.error, upstream.error);
-  assert.equal(ykk.error, null);
-  assertBytes(ykk.bytes, upstream.bytes, 'archive');
-  assert.deepStrictEqual(comparedEvents(ykk), comparedEvents(upstream));
-  assert.equal(ykk.pointer, upstream.pointer);
-  return { u: parseZip(upstream.bytes), y: parseZip(ykk.bytes) };
+function assertSameBytes(upstream, port) {
+  assert.deepStrictEqual(port.error, upstream.error);
+  assert.equal(port.error, null);
+  assertBytes(port.bytes, upstream.bytes, 'archive');
+  assert.deepStrictEqual(comparedEvents(port), comparedEvents(upstream));
+  assert.equal(port.pointer, upstream.pointer);
+  return { u: parseZip(upstream.bytes), y: parseZip(port.bytes) };
 }
 
 describe('differential: the encryption classes on their own (PORTING.md 7.9)', function () {
@@ -154,9 +154,9 @@ describe('differential: the encryption classes on their own (PORTING.md 7.9)', f
 
     for (const [title, make, chunks, password] of cases) {
       it(title, async function () {
-        const { upstream, ykk } = await driveBoth(make, chunks);
+        const { upstream, port } = await driveBoth(make, chunks);
         const input = Buffer.concat(chunks);
-        for (const run of [upstream, ykk]) {
+        for (const run of [upstream, port]) {
           // aes-hmac-etm-stream.js:27-30 (${salt}${passwordVerifier}${encodedData}${hmac})
           assert.equal(run.bytes.length, input.length + AES_OVERHEAD);
           const decrypted = decryptAes(run.bytes, password);
@@ -169,7 +169,7 @@ describe('differential: the encryption classes on their own (PORTING.md 7.9)', f
           assert.deepStrictEqual(last, { totalSize: run.bytes.length, getTotalSize: run.bytes.length, headerSent: true });
         }
         // aes-hmac-etm-stream.js:37-39
-        assert.deepStrictEqual(ykk.randomBytes, title.startsWith('no salt') ? [16] : []);
+        assert.deepStrictEqual(port.randomBytes, title.startsWith('no salt') ? [16] : []);
       });
     }
 
@@ -192,13 +192,13 @@ describe('differential: the encryption classes on their own (PORTING.md 7.9)', f
       };
       for (const key of ['pw', PASSWORD, PASSWORD_UTF8, PASSWORD_BYTES]) {
         const upstream = await fields('upstream', { salt: SALT, key });
-        const ykk = await fields('ykk', { salt: SALT, key });
-        assert.deepStrictEqual(ykk, upstream);
+        const port = await fields('port', { salt: SALT, key });
+        assert.deepStrictEqual(port, upstream);
         // aes-hmac-etm-stream.js:54-61 (PBKDF2-HMAC-SHA1, 1000 iterations, 66 bytes)
         const composite = crypto.pbkdf2Sync(key, SALT, 1000, 66, 'sha1');
-        assert.deepStrictEqual(ykk.aesKey, composite.subarray(0, 32));
-        assert.deepStrictEqual(ykk.hmacKey, composite.subarray(32, 64));
-        assert.deepStrictEqual(ykk.passwordVerifier, composite.subarray(64));
+        assert.deepStrictEqual(port.aesKey, composite.subarray(0, 32));
+        assert.deepStrictEqual(port.hmacKey, composite.subarray(32, 64));
+        assert.deepStrictEqual(port.passwordVerifier, composite.subarray(64));
       }
     });
   });
@@ -218,9 +218,9 @@ describe('differential: the encryption classes on their own (PORTING.md 7.9)', f
 
     for (const [title, make, chunks, password, crc = CRC] of cases) {
       it(title, async function () {
-        const { upstream, ykk } = await driveBoth(make, chunks, ZIP20_HEADER);
+        const { upstream, port } = await driveBoth(make, chunks, ZIP20_HEADER);
         const input = Buffer.concat(chunks);
-        for (const run of [upstream, ykk]) {
+        for (const run of [upstream, port]) {
           assert.equal(run.bytes.length, input.length + ZIP20_OVERHEAD);
           const decrypted = await decryptZip20(run.bytes, password);
           // crypto-stream.js:33-34 (10 random bytes, then bits 16..31 of the CRC, low byte first)
@@ -233,30 +233,30 @@ describe('differential: the encryption classes on their own (PORTING.md 7.9)', f
     }
 
     it('the check bytes of crc abf033d8 are f0 ab (crypto-stream.js:34)', async function () {
-      const { ykk } = await driveBoth((impl) => new impl.CryptoStream({ key: '123', crc: CRC }), [TEXT], ZIP20_HEADER);
-      const header = (await decryptZip20(ykk.bytes, '123')).header;
+      const { port } = await driveBoth((impl) => new impl.CryptoStream({ key: '123', crc: CRC }), [TEXT], ZIP20_HEADER);
+      const header = (await decryptZip20(port.bytes, '123')).header;
       assert.equal(header.toString('hex'), 'a0a1a2a3a4a5a6a7a8a9f0ab');
     });
 
     it('no data: nothing is written and no random bytes are drawn (crypto-stream.js:31-32)', async function () {
-      const { ykk } = await driveBoth((impl) => new impl.CryptoStream({ key: '123', crc: CRC }), [], ZIP20_HEADER);
-      assert.equal(ykk.bytes.length, 0);
-      assert.deepStrictEqual(ykk.randomBytes, []);
-      assert.deepStrictEqual(ykk.steps, [{ totalSize: undefined, getTotalSize: undefined, headerSent: false }]);
+      const { port } = await driveBoth((impl) => new impl.CryptoStream({ key: '123', crc: CRC }), [], ZIP20_HEADER);
+      assert.equal(port.bytes.length, 0);
+      assert.deepStrictEqual(port.randomBytes, []);
+      assert.deepStrictEqual(port.steps, [{ totalSize: undefined, getTotalSize: undefined, headerSent: false }]);
     });
 
-    it('the header option of ykk replaces crypto.randomBytes(12) (V10)', async function () {
+    it('the header option of port replaces crypto.randomBytes(12) (V10)', async function () {
       const chunks = [DATA.subarray(0, 100), DATA.subarray(100)];
       const upstream = await withRandom(ZIP20_HEADER, async () =>
         drive(new (await load('upstream')).CryptoStream({ key: PASSWORD, crc: CRC }), chunks)
       );
       const header = Buffer.from(ZIP20_HEADER);
-      const ykk = await withRandom(Buffer.alloc(12, 0xee), async () =>
-        drive(new (await load('ykk')).CryptoStream({ key: PASSWORD, crc: CRC, header }), chunks)
+      const port = await withRandom(Buffer.alloc(12, 0xee), async () =>
+        drive(new (await load('port')).CryptoStream({ key: PASSWORD, crc: CRC, header }), chunks)
       );
-      assertBytes(ykk.bytes, upstream.bytes);
-      assert.deepStrictEqual(ykk.steps, upstream.steps);
-      assert.deepStrictEqual(ykk.randomBytes, []);
+      assertBytes(port.bytes, upstream.bytes);
+      assert.deepStrictEqual(port.steps, upstream.steps);
+      assert.deepStrictEqual(port.randomBytes, []);
     });
   });
 
@@ -293,32 +293,32 @@ describe('differential: the encryption classes on their own (PORTING.md 7.9)', f
     for (const [title, chunksOf, plain = DATA] of cases) {
       it(title, async function () {
         const chunks = chunksOf();
-        const { ykk } = await driveBoth((impl) => new impl.DecryptoStream({ key: '123' }), chunks);
+        const { port } = await driveBoth((impl) => new impl.DecryptoStream({ key: '123' }), chunks);
         const length = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
         const expected = plain.subarray(0, Math.max(0, length - ZIP20_OVERHEAD));
-        assertBytes(ykk.bytes, expected, 'decrypted data');
+        assertBytes(port.bytes, expected, 'decrypted data');
         // decrypto-stream.js:29-31, 54-57
-        assert.equal(ykk.steps[ykk.steps.length - 1].getTotalSize, expected.length);
-        assert.equal(ykk.steps[ykk.steps.length - 1].totalSize, expected.length);
+        assert.equal(port.steps[port.steps.length - 1].getTotalSize, expected.length);
+        assert.equal(port.steps[port.steps.length - 1].totalSize, expected.length);
       });
     }
 
     it('called without new, a Buffer key and a key outside ASCII', async function () {
       for (const [key, bytes] of [[Buffer.from('123'), '123'], [PASSWORD, PASSWORD_UTF8], [PASSWORD_BYTES, PASSWORD_BYTES]]) {
         const encrypted = await encrypt(bytes, DATA);
-        const { ykk } = await driveBoth((impl) => impl.DecryptoStream({ key }), [encrypted.subarray(0, 7), encrypted.subarray(7)]);
-        assertBytes(ykk.bytes, DATA, 'decrypted data');
+        const { port } = await driveBoth((impl) => impl.DecryptoStream({ key }), [encrypted.subarray(0, 7), encrypted.subarray(7)]);
+        assertBytes(port.bytes, DATA, 'decrypted data');
       }
     });
 
     it('a wrong key: the same wrong bytes', async function () {
-      const { ykk } = await driveBoth((impl) => new impl.DecryptoStream({ key: PASSWORD_LATIN1 }), [await encrypt(PASSWORD, DATA)]);
-      assert.equal(ykk.bytes.length, DATA.length);
-      assert.notDeepStrictEqual(ykk.bytes, DATA);
+      const { port } = await driveBoth((impl) => new impl.DecryptoStream({ key: PASSWORD_LATIN1 }), [await encrypt(PASSWORD, DATA)]);
+      assert.equal(port.bytes.length, DATA.length);
+      assert.notDeepStrictEqual(port.bytes, DATA);
     });
 
     it('CryptoStream piped into DecryptoStream (archiver-zip-encrypted/test/crypto-stream.js:10-27)', async function () {
-      for (const name of ['upstream', 'ykk']) {
+      for (const name of ['upstream', 'port']) {
         const impl = await load(name);
         const cryptoStream = new impl.CryptoStream({ crc: CRC, key: PASSWORD });
         const decryptoStream = new impl.DecryptoStream({ key: PASSWORD });
@@ -346,11 +346,11 @@ describe('differential: the encryption classes on their own (PORTING.md 7.9)', f
     for (const [title, key] of keys) {
       it(`${title}: encrypt and decrypt, call after call`, async function () {
         const upstream = await load('upstream');
-        const ykk = await load('ykk');
+        const port = await load('port');
         const parts = [Buffer.from('hello world!'), Buffer.alloc(0), DATA, Buffer.from([0x00]), Buffer.from([0xff, 0x00, 0x80])];
 
         const u = new upstream.CryptoCipher(key);
-        const y = new ykk.CryptoCipher(key);
+        const y = new port.CryptoCipher(key);
         // CryptoCipher.js:15-18
         assert.equal(Buffer.isBuffer(y.key), true);
         assert.deepStrictEqual(y.key, u.key);
@@ -365,7 +365,7 @@ describe('differential: the encryption classes on their own (PORTING.md 7.9)', f
         assert.notDeepStrictEqual(encrypted[0], parts[0]);
 
         const ud = new upstream.CryptoCipher(key);
-        const yd = new ykk.CryptoCipher(key);
+        const yd = new port.CryptoCipher(key);
         for (const [index, part] of encrypted.entries()) {
           const expected = ud.decrypt(Buffer.from(part));
           const found = yd.decrypt(Buffer.from(part));
@@ -376,7 +376,7 @@ describe('differential: the encryption classes on their own (PORTING.md 7.9)', f
 
         // CryptoCipher.js:51-55 (decrypt updates the keys with the plain byte: not the inverse call order of encrypt)
         const um = new upstream.CryptoCipher(key);
-        const ym = new ykk.CryptoCipher(key);
+        const ym = new port.CryptoCipher(key);
         assert.deepStrictEqual(ym.decrypt(Buffer.from(parts[0])), um.decrypt(Buffer.from(parts[0])));
         assert.deepStrictEqual(ym.encrypt(Buffer.from(parts[2])), um.encrypt(Buffer.from(parts[2])));
       });
@@ -384,19 +384,19 @@ describe('differential: the encryption classes on their own (PORTING.md 7.9)', f
 
     it('known bytes: key 123, hello world!', async function () {
       const upstream = await load('upstream');
-      const ykk = await load('ykk');
+      const port = await load('port');
       const expected = new upstream.CryptoCipher('123').encrypt(Buffer.from('hello world!')).toString('hex');
-      assert.equal(new ykk.CryptoCipher('123').encrypt(Buffer.from('hello world!')).toString('hex'), expected);
-      assert.equal(new ykk.CryptoCipher(Buffer.from('123')).decrypt(Buffer.from(expected, 'hex')).toString(), 'hello world!');
+      assert.equal(new port.CryptoCipher('123').encrypt(Buffer.from('hello world!')).toString('hex'), expected);
+      assert.equal(new port.CryptoCipher(Buffer.from('123')).decrypt(Buffer.from(expected, 'hex')).toString(), 'hello world!');
     });
 
     it('data above 3 MiB', async function () {
       const upstream = await load('upstream');
-      const ykk = await load('ykk');
+      const port = await load('port');
       const expected = new upstream.CryptoCipher(PASSWORD).encrypt(LARGE);
-      const found = new ykk.CryptoCipher(PASSWORD).encrypt(LARGE);
+      const found = new port.CryptoCipher(PASSWORD).encrypt(LARGE);
       assertBytes(found, expected, 'encrypted');
-      assertBytes(new ykk.CryptoCipher(PASSWORD).decrypt(expected), LARGE, 'decrypted');
+      assertBytes(new port.CryptoCipher(PASSWORD).decrypt(expected), LARGE, 'decrypted');
     });
   });
 });
@@ -407,7 +407,7 @@ describe('differential: passwords outside ASCII (ENCRYPTED-006)', function () {
   let serial = 0;
 
   before(function () {
-    root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'ykk-diff-password-')));
+    root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'archiver-wasm-diff-password-')));
   });
 
   after(function () {
@@ -492,60 +492,60 @@ describe('differential: passwords outside ASCII (ENCRYPTED-006)', function () {
   for (const method of ['aes256', 'zip20']) {
     describe(method, function () {
       it('a string password, stored: the bytes of upstream, decrypted under its UTF-8 bytes and by 7z', async function () {
-        const { upstream, ykk } = await runBoth(archiveOf(method, PASSWORD, { store: true }), { random: ZIP20_HEADER });
-        const zips = assertSameBytes(upstream, ykk);
+        const { upstream, port } = await runBoth(archiveOf(method, PASSWORD, { store: true }), { random: ZIP20_HEADER });
+        const zips = assertSameBytes(upstream, port);
         // zip-encrypted.js:27-29 (Buffer.from(password, 'utf-8'))
         await assertDecrypts(zips.y, method, PASSWORD_UTF8, PASSWORD_LATIN1);
-        assert7z(ykk.bytes, PASSWORD);
+        assert7z(port.bytes, PASSWORD);
       });
 
       it('a string password, default method: decrypted under its UTF-8 bytes and by 7z', async function () {
-        const { upstream, ykk } = await runBoth(archiveOf(method, PASSWORD, {}), { random: ZIP20_HEADER });
-        assert.equal(ykk.error, null);
+        const { upstream, port } = await runBoth(archiveOf(method, PASSWORD, {}), { random: ZIP20_HEADER });
+        assert.equal(port.error, null);
         assert.equal(upstream.error, null);
         await assertDecrypts(parseZip(upstream.bytes), method, PASSWORD_UTF8, PASSWORD_LATIN1);
-        await assertDecrypts(parseZip(ykk.bytes), method, PASSWORD_UTF8, PASSWORD_LATIN1);
-        assert7z(ykk.bytes, PASSWORD);
+        await assertDecrypts(parseZip(port.bytes), method, PASSWORD_UTF8, PASSWORD_LATIN1);
+        assert7z(port.bytes, PASSWORD);
         assert7z(upstream.bytes, PASSWORD);
       });
 
       it('a Buffer password of the same UTF-8 bytes: the archive of the string password', async function () {
         const text = await runBoth(archiveOf(method, PASSWORD, { store: true }), { random: ZIP20_HEADER });
-        const { upstream, ykk } = await runBoth(archiveOf(method, Buffer.from(PASSWORD_UTF8), { store: true }), { random: ZIP20_HEADER });
-        assertSameBytes(upstream, ykk);
-        assertBytes(ykk.bytes, text.ykk.bytes, 'archive of the string password');
-        assert7z(ykk.bytes, PASSWORD);
+        const { upstream, port } = await runBoth(archiveOf(method, Buffer.from(PASSWORD_UTF8), { store: true }), { random: ZIP20_HEADER });
+        assertSameBytes(upstream, port);
+        assertBytes(port.bytes, text.port.bytes, 'archive of the string password');
+        assert7z(port.bytes, PASSWORD);
       });
 
       it('a Buffer password that is not UTF-8, stored: the bytes of upstream, decrypted under those bytes', async function () {
-        const { upstream, ykk } = await runBoth(archiveOf(method, Buffer.from(PASSWORD_BYTES), { store: true }), { random: ZIP20_HEADER });
-        const zips = assertSameBytes(upstream, ykk);
+        const { upstream, port } = await runBoth(archiveOf(method, Buffer.from(PASSWORD_BYTES), { store: true }), { random: ZIP20_HEADER });
+        const zips = assertSameBytes(upstream, port);
         await assertDecrypts(zips.y, method, PASSWORD_BYTES, Buffer.from(PASSWORD_BYTES.toString('utf-8'), 'utf-8'));
       });
 
       it('a Buffer password of the latin1 bytes is another password', async function () {
         const text = await runBoth(archiveOf(method, PASSWORD, { store: true }), { random: ZIP20_HEADER });
-        const { upstream, ykk } = await runBoth(archiveOf(method, Buffer.from(PASSWORD_LATIN1), { store: true }), { random: ZIP20_HEADER });
-        assertSameBytes(upstream, ykk);
-        assert.notDeepStrictEqual(ykk.bytes, text.ykk.bytes);
+        const { upstream, port } = await runBoth(archiveOf(method, Buffer.from(PASSWORD_LATIN1), { store: true }), { random: ZIP20_HEADER });
+        assertSameBytes(upstream, port);
+        assert.notDeepStrictEqual(port.bytes, text.port.bytes);
       });
 
       // zip-aes-stream.js:22-24, zip-crypto-stream.js:19-21 (the engine converts a string password itself)
       it('the engine built by hand, a string password: the bytes of upstream, decrypted under its UTF-8 bytes and by 7z', async function () {
-        const { upstream, ykk } = await runBoth(engineOf(method, PASSWORD, { store: true }), { random: ZIP20_HEADER });
-        assert.deepStrictEqual(ykk.error, upstream.error);
-        assert.equal(ykk.error, null);
-        assertBytes(ykk.bytes, upstream.bytes, 'archive');
-        await assertDecrypts(parseZip(ykk.bytes), method, PASSWORD_UTF8, PASSWORD_LATIN1);
-        assert7z(ykk.bytes, PASSWORD);
+        const { upstream, port } = await runBoth(engineOf(method, PASSWORD, { store: true }), { random: ZIP20_HEADER });
+        assert.deepStrictEqual(port.error, upstream.error);
+        assert.equal(port.error, null);
+        assertBytes(port.bytes, upstream.bytes, 'archive');
+        await assertDecrypts(parseZip(port.bytes), method, PASSWORD_UTF8, PASSWORD_LATIN1);
+        assert7z(port.bytes, PASSWORD);
       });
 
       it('the engine built by hand, a Buffer password that is not UTF-8: the bytes of upstream', async function () {
-        const { upstream, ykk } = await runBoth(engineOf(method, Buffer.from(PASSWORD_BYTES), { store: true }), { random: ZIP20_HEADER });
-        assert.deepStrictEqual(ykk.error, upstream.error);
-        assert.equal(ykk.error, null);
-        assertBytes(ykk.bytes, upstream.bytes, 'archive');
-        await assertDecrypts(parseZip(ykk.bytes), method, PASSWORD_BYTES);
+        const { upstream, port } = await runBoth(engineOf(method, Buffer.from(PASSWORD_BYTES), { store: true }), { random: ZIP20_HEADER });
+        assert.deepStrictEqual(port.error, upstream.error);
+        assert.equal(port.error, null);
+        assertBytes(port.bytes, upstream.bytes, 'archive');
+        await assertDecrypts(parseZip(port.bytes), method, PASSWORD_BYTES);
       });
     });
   }

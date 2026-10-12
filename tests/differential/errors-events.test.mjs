@@ -24,9 +24,9 @@ const SAME_KEY_ORDER = ['zip', 'tar', 'tar.gz', 'json'];
 const SETTLE_MS = 50;
 // the child of the P9 case waits this long for the exception; an implementation that does not throw then exits with code 0
 const CRASH_WAIT_MS = 500;
-const BARE_FORMAT = 'ykk-diff-bare';
-const NO_END_FORMAT = 'ykk-diff-no-end';
-const UNREGISTERED_FORMAT = 'ykk-diff-unregistered';
+const BARE_FORMAT = 'archiver-wasm-diff-bare';
+const NO_END_FORMAT = 'archiver-wasm-diff-no-end';
+const UNREGISTERED_FORMAT = 'archiver-wasm-diff-unregistered';
 const TAR_UNPIPE_MESSAGE = "Cannot read properties of undefined (reading 'apply')";
 
 // node-archiver/lib/error.js:3-26
@@ -138,35 +138,35 @@ function comparedEvents(format, events) {
 }
 
 // PORTING.md 14.2 (helper of the test: the scenario function itself returned on both implementations)
-function assertRan({ upstream, ykk }) {
+function assertRan({ upstream, port }) {
   assert.equal(upstream.error, null, 'upstream: the scenario threw');
-  assert.equal(ykk.error, null, 'ykk: the scenario threw');
+  assert.equal(port.error, null, 'port: the scenario threw');
 }
 
 // PORTING.md 14.2 (events: the sequences are equal; byte-equal cases also agree on pointer() and bytes)
-function assertSameRun(format, { upstream, ykk }) {
-  assert.deepStrictEqual(comparedEvents(format, ykk.events), comparedEvents(format, upstream.events));
-  assert.deepStrictEqual(ykk.settled, upstream.settled);
-  assert.deepStrictEqual(ykk.value, upstream.value);
+function assertSameRun(format, { upstream, port }) {
+  assert.deepStrictEqual(comparedEvents(format, port.events), comparedEvents(format, upstream.events));
+  assert.deepStrictEqual(port.settled, upstream.settled);
+  assert.deepStrictEqual(port.value, upstream.value);
   if (SAME_KEY_ORDER.includes(format)) {
-    assert.equal(ordered(ykk.events), ordered(upstream.events), `${format}: key order of the event payloads`);
-    assert.equal(ordered(ykk.settled), ordered(upstream.settled), `${format}: key order of what settled`);
-    assert.equal(ordered(ykk.value), ordered(upstream.value), `${format}: key order of the returned value`);
+    assert.equal(ordered(port.events), ordered(upstream.events), `${format}: key order of the event payloads`);
+    assert.equal(ordered(port.settled), ordered(upstream.settled), `${format}: key order of what settled`);
+    assert.equal(ordered(port.value), ordered(upstream.value), `${format}: key order of the returned value`);
   }
 }
 
 // PORTING.md 3.2 V1 (a gzip member differs in its deflate stream only)
-function assertSameBytes(format, { upstream, ykk }) {
+function assertSameBytes(format, { upstream, port }) {
   if (format === 'tar.gz') {
     const u = splitGzip(upstream.bytes);
-    const y = splitGzip(ykk.bytes);
+    const y = splitGzip(port.bytes);
     assert.deepStrictEqual(y.header, u.header);
     assert.deepStrictEqual(y.payload, u.payload);
     assert.deepStrictEqual(y.trailer, u.trailer);
     return;
   }
-  assert.equal(ykk.bytes.length, upstream.bytes.length);
-  assert.ok(ykk.bytes.equals(upstream.bytes), `${format}: archive bytes differ`);
+  assert.equal(port.bytes.length, upstream.bytes.length);
+  assert.ok(port.bytes.equals(upstream.bytes), `${format}: archive bytes differ`);
 }
 
 // node-archiver/lib/core.js:525-556, 570-578, 651-659, 749-771 (one call per row, each on a fresh archive)
@@ -386,15 +386,15 @@ const CONSTRUCTION_STEPS = [
   },
   {
     title: 'registerFormat: module invalid',
-    message: 'register(ykk-diff-invalid): format module invalid',
-    run: (impl) => impl.archiver.registerFormat('ykk-diff-invalid', {}),
+    message: 'register(archiver-wasm-diff-invalid): format module invalid',
+    run: (impl) => impl.archiver.registerFormat('archiver-wasm-diff-invalid', {}),
   },
   {
     title: 'registerFormat: module missing methods',
-    message: 'register(ykk-diff-missing): format module missing methods',
+    message: 'register(archiver-wasm-diff-missing): format module missing methods',
     run: (impl) =>
       impl.archiver.registerFormat(
-        'ykk-diff-missing',
+        'archiver-wasm-diff-missing',
         class {
           append(source, data, callback) {
             callback(null, data);
@@ -445,7 +445,7 @@ async function constructionErrors(impl) {
     }
   });
   const registered = {};
-  for (const format of ['zip', 'tar', 'json', 'zip-encrypted', UNREGISTERED_FORMAT, 'ykk-diff-invalid', 'ykk-diff-missing']) {
+  for (const format of ['zip', 'tar', 'json', 'zip-encrypted', UNREGISTERED_FORMAT, 'archiver-wasm-diff-invalid', 'archiver-wasm-diff-missing']) {
     registered[format] = impl.archiver.isRegisteredFormat(format);
   }
   return { steps, registered };
@@ -555,8 +555,8 @@ describe('differential: errors and events (PORTING.md 14.2, E1 to E4)', () => {
 
   before(async () => {
     await load('upstream');
-    await load('ykk');
-    root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'ykk-diff-errors-')));
+    await load('port');
+    root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'archiver-wasm-diff-errors-')));
     const walk = path.join(root, 'walk');
     fs.mkdirSync(walk);
     fs.writeFileSync(path.join(walk, 'one.txt'), 'one');
@@ -700,10 +700,10 @@ describe('differential: errors and events (PORTING.md 14.2, E1 to E4)', () => {
         json: true,
         'zip-encrypted': true,
         [UNREGISTERED_FORMAT]: false,
-        'ykk-diff-invalid': false,
-        'ykk-diff-missing': false,
+        'archiver-wasm-diff-invalid': false,
+        'archiver-wasm-diff-missing': false,
       });
-      assert.deepStrictEqual(runs.ykk.value, runs.upstream.value);
+      assert.deepStrictEqual(runs.port.value, runs.upstream.value);
     });
   });
 
@@ -732,8 +732,8 @@ describe('differential: errors and events (PORTING.md 14.2, E1 to E4)', () => {
           });
           assert.equal(runs.upstream.code, CRASH_EXIT_CODE, runs.upstream.stderr);
           assert.deepStrictEqual(runs.upstream.crash, { name: 'TypeError', message: TAR_UNPIPE_MESSAGE });
-          assert.equal(runs.ykk.code, runs.upstream.code, runs.ykk.stderr);
-          assert.deepStrictEqual(runs.ykk.crash, runs.upstream.crash);
+          assert.equal(runs.port.code, runs.upstream.code, runs.port.stderr);
+          assert.deepStrictEqual(runs.port.crash, runs.upstream.crash);
         });
       } else {
         it(`${format}: during an entry`, async () => {
@@ -755,7 +755,7 @@ describe('differential: errors and events (PORTING.md 14.2, E1 to E4)', () => {
         assertSameRun(format, runs);
         assertSameBytes(format, runs);
         if (format !== 'tar.gz') {
-          assert.equal(runs.ykk.pointer, runs.upstream.pointer);
+          assert.equal(runs.port.pointer, runs.upstream.pointer);
         }
       });
     }
@@ -818,7 +818,7 @@ describe('differential: errors and events (PORTING.md 14.2, E1 to E4)', () => {
         assertSameBytes(format, runs);
         if (format !== 'tar.gz') {
           assert.equal(runs.upstream.pointer, runs.upstream.bytes.length);
-          assert.equal(runs.ykk.pointer, runs.upstream.pointer);
+          assert.equal(runs.port.pointer, runs.upstream.pointer);
         }
       });
     }

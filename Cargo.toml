@@ -1,6 +1,6 @@
 # Cargo.toml
 [workspace]
-members = ["crates/ykk-core", "crates/ykk-wasm"]
+members = ["crates/archiver-core", "crates/archiver-wasm"]
 resolver = "2"
 
 [workspace.lints.clippy]

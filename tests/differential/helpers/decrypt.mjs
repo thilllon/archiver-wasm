@@ -1,6 +1,6 @@
 // tests/differential/helpers/decrypt.mjs
 // Payload decryption for the differential tests, built from upstream's own code and Node's crypto
-// (PORTING.md 14.2). No ykk code.
+// (PORTING.md 14.2). No port code.
 //
 //   decryptZip20(payload, password) -> Promise<{ header, data }>
 //       header: the 12 decrypted header bytes (fewer when the payload is shorter, P17)

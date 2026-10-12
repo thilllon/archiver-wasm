@@ -63,7 +63,7 @@ export interface WasmAesHmacEtmStream {
   transform(data: Uint8Array): Uint8Array; flush(): Uint8Array; getTotalSize(): number; free(): void;
 }
 
-export interface YkkWasm {
+export interface ArchiverWasm {
   WasmZipStream: new (forceZip64: boolean, encryption: number) => WasmZipStream;
   WasmPack: new () => WasmPack;
   WasmGzip: new (level: number, strategy: number, os: number) => WasmGzip;

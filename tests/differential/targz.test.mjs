@@ -45,7 +45,7 @@ function streamOf(chunks) {
 
 // PORTING.md 14.2 (determinism: modes are set by chmod, times by lutimes)
 function makeTree() {
-  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'ykk-diff-targz-')));
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'archiver-wasm-diff-targz-')));
   const target = path.join(root, 'b.bin');
   fs.writeFileSync(target, Buffer.alloc(600, 0x62));
   fs.chmodSync(target, 0o600);
@@ -121,36 +121,36 @@ async function g2PlainAfterAppend(impl, ctx) {
 }
 
 // PORTING.md 14.2 (comparison rules, tar.gz: equal 10-byte header, equal gunzipped payload, equal 8-byte trailer)
-function assertSameGzip({ upstream, ykk }, xfl) {
+function assertSameGzip({ upstream, port }, xfl) {
   assert.strictEqual(upstream.error, null);
-  assert.deepStrictEqual(ykk.error, upstream.error);
+  assert.deepStrictEqual(port.error, upstream.error);
   const expected = splitGzip(upstream.bytes);
-  const actual = splitGzip(ykk.bytes);
+  const actual = splitGzip(port.bytes);
   const header = Buffer.from([0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, xfl, GZIP_OS]).toString('hex');
   assert.strictEqual(expected.header.toString('hex'), header);
   assert.strictEqual(actual.header.toString('hex'), header);
   assert.ok(actual.payload.equals(expected.payload), 'gunzipped payload');
   assert.strictEqual(actual.trailer.toString('hex'), expected.trailer.toString('hex'));
   assert.strictEqual(actual.size, expected.payload.length);
-  assert.ok(zlib.gunzipSync(ykk.bytes).equals(expected.payload), 'one gzip member');
-  assert.deepStrictEqual(selectEvents(ykk.events), selectEvents(upstream.events));
+  assert.ok(zlib.gunzipSync(port.bytes).equals(expected.payload), 'one gzip member');
+  assert.deepStrictEqual(selectEvents(port.events), selectEvents(upstream.events));
   return parseTar(actual.payload);
 }
 
 // PORTING.md 14.2 (class D: whole output, exact event sequences with 'end' and 'close', pointer())
-function assertSameAbort({ upstream, ykk }, value, names) {
+function assertSameAbort({ upstream, port }, value, names) {
   assert.strictEqual(upstream.error, null);
-  assert.deepStrictEqual(ykk.error, upstream.error);
+  assert.deepStrictEqual(port.error, upstream.error);
   assert.strictEqual(upstream.value, value);
-  assert.strictEqual(ykk.value, value);
+  assert.strictEqual(port.value, value);
   assert.strictEqual(upstream.bytes.length, 0);
-  assert.ok(ykk.bytes.equals(upstream.bytes));
+  assert.ok(port.bytes.equals(upstream.bytes));
   assert.deepStrictEqual(
     upstream.events.map((record) => record.event),
     names
   );
-  assert.deepStrictEqual(ykk.events, upstream.events);
-  assert.strictEqual(ykk.pointer, upstream.pointer);
+  assert.deepStrictEqual(port.events, upstream.events);
+  assert.strictEqual(port.pointer, upstream.pointer);
 }
 
 describe('differential: tar.gz', function () {
@@ -198,7 +198,7 @@ describe('differential: tar.gz', function () {
   it('G1: zlib options other than level and strategy are validated and have no effect on the container (V2)', async function () {
     assertSameGzip(await runBoth(g1, { args: { root, gzipOptions: { memLevel: 1, windowBits: 9, chunkSize: 64 } } }), 0);
     const upstream = await load('upstream');
-    const ykk = await load('ykk');
+    const port = await load('port');
     for (const gzipOptions of [{ level: 10 }, { level: 'x' }, { windowBits: 7 }, { chunkSize: 1 }, { strategy: 9 }, { memLevel: 0 }]) {
       let expected;
       try {
@@ -209,7 +209,7 @@ describe('differential: tar.gz', function () {
       assert.ok(expected instanceof Error, `upstream accepts ${JSON.stringify(gzipOptions)}`);
       assert.throws(
         function () {
-          new ykk.TarArchive({ gzip: true, gzipOptions });
+          new port.TarArchive({ gzip: true, gzipOptions });
         },
         { name: expected.name, code: expected.code, message: expected.message }
       );

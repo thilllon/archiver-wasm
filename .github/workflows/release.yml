@@ -1,6 +1,6 @@
 # PORTING.md 15.5. Publishes the version named by a pushed tag v<version> to npm.
 #
-# The npm trusted publisher of @thilllon/ykk is registered with this workflow filename.
+# The npm trusted publisher of archiver-wasm is registered with this workflow filename.
 # Never rename or move this file: npm checks the calling workflow file of an OIDC
 # publication, and a publication from any other file is rejected.
 name: release

@@ -15,7 +15,7 @@ const manifest = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'ut
 
 const REQUIRED = [
   'dist/index.mjs', 'dist/index.d.mts', 'dist/index.cjs', 'dist/index.d.cts',
-  'dist/wasm/ykk_wasm.cjs', 'dist/wasm/ykk_wasm_bg.wasm', 'dist/wasm/ykk_wasm.d.cts',
+  'dist/wasm/archiver_wasm.cjs', 'dist/wasm/archiver_wasm_bg.wasm', 'dist/wasm/archiver_wasm.d.cts',
   'THIRD_PARTY_NOTICES.md',
 ];
 const FORBIDDEN = ['src/', 'crates/', 'tests/', '.upstream/', 'scripts/'];
@@ -74,7 +74,7 @@ const BOTH_FORMATS = [
   "ns.registerFormat('from-import', Format);",
   "if (!ns.isRegisteredFormat('from-require') || !cjs.isRegisteredFormat('from-import')) { throw new Error('import and require have two format registries'); }",
   "for (const format of ['zip', 'tar', 'json']) { if (!ns.isRegisteredFormat(format) || !cjs.isRegisteredFormat(format)) { throw new Error(format + ' is not registered'); } }",
-  "const glue = Object.keys(require.cache).filter((file) => file.endsWith('ykk_wasm.cjs'));",
+  "const glue = Object.keys(require.cache).filter((file) => file.endsWith('archiver_wasm.cjs'));",
   "if (glue.length !== 1) { throw new Error('the wasm glue is loaded ' + glue.length + ' times'); }",
   "const err = new ns.ArchiverError('ABORTED');",
   "if (ns.ArchiverError.name !== 'ArchiverError' || err.constructor.name !== 'ArchiverError') { throw new Error('ArchiverError is named ' + ns.ArchiverError.name); }",
@@ -128,7 +128,7 @@ function smoke(work, install) {
   // an empty project, with the repository's typescript and @types/node for the two type checks
   const project = path.join(work, 'project');
   fs.mkdirSync(project);
-  fs.writeFileSync(path.join(project, 'package.json'), JSON.stringify({ name: 'ykk-tarball-check', version: '0.0.0', private: true }) + '\n');
+  fs.writeFileSync(path.join(project, 'package.json'), JSON.stringify({ name: 'archiver-wasm-tarball-check', version: '0.0.0', private: true }) + '\n');
   run('npm install', npm, [
     'install', '--no-audit', '--no-fund', '--save-exact', install,
     'typescript@' + manifest.devDependencies.typescript,
@@ -160,7 +160,7 @@ function smoke(work, install) {
   }
 }
 
-const work = fs.mkdtempSync(path.join(os.tmpdir(), 'ykk-tarball-'));
+const work = fs.mkdtempSync(path.join(os.tmpdir(), 'archiver-wasm-tarball-'));
 try {
   const target = spec ? { install: spec, label: spec } : pack(work);
   smoke(work, target.install);

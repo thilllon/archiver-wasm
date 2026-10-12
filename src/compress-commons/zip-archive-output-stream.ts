@@ -5,7 +5,7 @@ import ArchiveOutputStream from "./archive-output-stream.js";
 import ZipArchiveEntry from "./zip-archive-entry.js";
 import { resolveLevel, validateZlibOptions } from "../zlib-options.js";
 import { EMPTY, MAX_CHUNK, toBuffer, wasm, wasmString } from "../wasm.js";
-import type { YkkWasm } from "../wasm.js";
+import type { ArchiverWasm } from "../wasm.js";
 import type { ArchiverOptions, ModuleCallback } from "../types.js";
 
 // deps/compress-commons/lib/archivers/zip/constants.js:28
@@ -40,7 +40,7 @@ function _defaults(o?: ArchiverOptions): ZipArchiveOutputStreamOptions {
 export default class ZipArchiveOutputStream extends ArchiveOutputStream {
   options: ZipArchiveOutputStreamOptions;
   _entries: ZipArchiveEntry[];
-  _engine: InstanceType<YkkWasm["WasmZipStream"]>;
+  _engine: InstanceType<ArchiverWasm["WasmZipStream"]>;
 
   // deps/compress-commons/lib/archivers/zip/zip-archive-output-stream.js:44
   constructor(options?: ArchiverOptions) {

@@ -1,12 +1,14 @@
-// The wasm-bindgen surface of ykk-core (PORTING.md 5.3). Marshalling only (5.4 to 5.6).
+// The wasm-bindgen surface of archiver-core (PORTING.md 5.3). Marshalling only (5.4 to 5.6).
 
 use wasm_bindgen::prelude::*;
 
-use ykk_core::error::ZipError;
-use ykk_core::tar::Header;
-use ykk_core::zip::encrypted::aes_hmac_etm_stream::COMPOSITE_KEY_LENGTH;
-use ykk_core::zip::encrypted::crypto_stream::HEADER_LENGTH;
-use ykk_core::zip::{DateFields, Encryption, EntryOptions, Source, ZipArchiveEntry, ZipEntryData};
+use archiver_core::error::ZipError;
+use archiver_core::tar::Header;
+use archiver_core::zip::encrypted::aes_hmac_etm_stream::COMPOSITE_KEY_LENGTH;
+use archiver_core::zip::encrypted::crypto_stream::HEADER_LENGTH;
+use archiver_core::zip::{
+    DateFields, Encryption, EntryOptions, Source, ZipArchiveEntry, ZipEntryData,
+};
 
 // PORTING.md 5.5
 fn to_js_error<E: std::fmt::Display>(e: E) -> JsError {
@@ -16,7 +18,7 @@ fn to_js_error<E: std::fmt::Display>(e: E) -> JsError {
 // ---------------------------------------------------------------- zip
 #[wasm_bindgen]
 pub struct WasmZipStream {
-    inner: ykk_core::zip::ZipStream,
+    inner: archiver_core::zip::ZipStream,
 }
 
 #[wasm_bindgen]
@@ -32,7 +34,7 @@ impl WasmZipStream {
             _ => return Err(to_js_error(ZipError::InvalidEncryption(encryption))),
         };
         Ok(WasmZipStream {
-            inner: ykk_core::zip::ZipStream::new(force_zip64, encryption),
+            inner: archiver_core::zip::ZipStream::new(force_zip64, encryption),
         })
     }
 
@@ -335,7 +337,7 @@ impl WasmZipEntryInfo {
 // ---------------------------------------------------------------- tar
 #[wasm_bindgen]
 pub struct WasmPack {
-    inner: ykk_core::tar::Pack,
+    inner: archiver_core::tar::Pack,
     pax: Vec<String>,
 }
 
@@ -345,7 +347,7 @@ impl WasmPack {
     #[wasm_bindgen(constructor)]
     pub fn new() -> WasmPack {
         WasmPack {
-            inner: ykk_core::tar::Pack::new(),
+            inner: archiver_core::tar::Pack::new(),
             pax: Vec::new(),
         }
     }
@@ -409,7 +411,7 @@ impl WasmPack {
     /// overflow(pack, size): zero padding to the next 512-byte boundary.
     // deps/tar-stream/pack.js:280-283
     pub fn overflow(&mut self, size: f64) {
-        ykk_core::tar::overflow(&mut self.inner, size);
+        archiver_core::tar::overflow(&mut self.inner, size);
     }
 
     /// Appends END_OF_TAR (1024 zero bytes) once.
@@ -428,7 +430,7 @@ impl WasmPack {
 // ---------------------------------------------------------------- gzip, json
 #[wasm_bindgen]
 pub struct WasmGzip {
-    inner: ykk_core::gzip::Gzip,
+    inner: archiver_core::gzip::Gzip,
 }
 
 #[wasm_bindgen]
@@ -437,7 +439,7 @@ impl WasmGzip {
     #[wasm_bindgen(constructor)]
     pub fn new(level: i32, strategy: i32, os: u8) -> WasmGzip {
         WasmGzip {
-            inner: ykk_core::gzip::Gzip::new(level, strategy, os),
+            inner: archiver_core::gzip::Gzip::new(level, strategy, os),
         }
     }
 
@@ -461,25 +463,25 @@ impl WasmGzip {
 // node-archiver/lib/plugins/json.js:60
 #[wasm_bindgen(js_name = jsonAppend)]
 pub fn json_append(seed: u32, chunk: &[u8]) -> u32 {
-    let entry = ykk_core::json::JsonEntry {
+    let entry = archiver_core::json::JsonEntry {
         crc32: seed,
         size: 0,
     };
-    ykk_core::json::append(entry, chunk).crc32
+    archiver_core::json::append(entry, chunk).crc32
 }
 
-/// crc-32 `buf(chunk, seed) >>> 0` (ykk_core::crc32::buf): the CRC of a zip buffer source,
+/// crc-32 `buf(chunk, seed) >>> 0` (archiver_core::crc32::buf): the CRC of a zip buffer source,
 /// fed in slices by TypeScript before entry() (7.5).
 // deps/crc-32/crc32.js:70-82
 #[wasm_bindgen(js_name = crc32Update)]
 pub fn crc32_update(seed: u32, chunk: &[u8]) -> u32 {
-    ykk_core::crc32::buf(chunk, seed)
+    archiver_core::crc32::buf(chunk, seed)
 }
 
 // ---------------------------------------------------------------- encryption primitives
 #[wasm_bindgen]
 pub struct WasmCryptoCipher {
-    inner: ykk_core::zip::encrypted::CryptoCipher,
+    inner: archiver_core::zip::encrypted::CryptoCipher,
 }
 
 #[wasm_bindgen]
@@ -488,7 +490,7 @@ impl WasmCryptoCipher {
     #[wasm_bindgen(constructor)]
     pub fn new(key: &[u8]) -> WasmCryptoCipher {
         WasmCryptoCipher {
-            inner: ykk_core::zip::encrypted::CryptoCipher::new(key),
+            inner: archiver_core::zip::encrypted::CryptoCipher::new(key),
         }
     }
 
@@ -505,7 +507,7 @@ impl WasmCryptoCipher {
 
 #[wasm_bindgen]
 pub struct WasmCryptoStream {
-    inner: ykk_core::zip::encrypted::CryptoStream,
+    inner: archiver_core::zip::encrypted::CryptoStream,
 }
 
 #[wasm_bindgen]
@@ -521,7 +523,7 @@ impl WasmCryptoStream {
             })
         })?;
         Ok(WasmCryptoStream {
-            inner: ykk_core::zip::encrypted::CryptoStream::new(key, crc, header),
+            inner: archiver_core::zip::encrypted::CryptoStream::new(key, crc, header),
         })
     }
 
@@ -535,7 +537,7 @@ impl WasmCryptoStream {
 
 #[wasm_bindgen]
 pub struct WasmDecryptoStream {
-    inner: ykk_core::zip::encrypted::DecryptoStream,
+    inner: archiver_core::zip::encrypted::DecryptoStream,
 }
 
 #[wasm_bindgen]
@@ -544,7 +546,7 @@ impl WasmDecryptoStream {
     #[wasm_bindgen(constructor)]
     pub fn new(key: &[u8]) -> WasmDecryptoStream {
         WasmDecryptoStream {
-            inner: ykk_core::zip::encrypted::DecryptoStream::new(key),
+            inner: archiver_core::zip::encrypted::DecryptoStream::new(key),
         }
     }
 
@@ -564,7 +566,7 @@ impl WasmDecryptoStream {
 
 #[wasm_bindgen]
 pub struct WasmAesHmacEtmStream {
-    inner: ykk_core::zip::encrypted::AesHmacEtmStream,
+    inner: archiver_core::zip::encrypted::AesHmacEtmStream,
 }
 
 #[wasm_bindgen]
@@ -578,7 +580,7 @@ impl WasmAesHmacEtmStream {
         password_verifier: &[u8],
         salt: &[u8],
     ) -> Result<WasmAesHmacEtmStream, JsError> {
-        let inner = ykk_core::zip::encrypted::AesHmacEtmStream::from_parts(
+        let inner = archiver_core::zip::encrypted::AesHmacEtmStream::from_parts(
             aes_key,
             hmac_key,
             password_verifier,
@@ -592,7 +594,7 @@ impl WasmAesHmacEtmStream {
     // archiver-zip-encrypted/lib/aes/aes-hmac-etm-stream.js:54-61
     #[wasm_bindgen(js_name = deriveKey)]
     pub fn derive_key(salt: &[u8], key: &[u8]) -> Vec<u8> {
-        let composite = ykk_core::zip::encrypted::derive_key(salt, key);
+        let composite = archiver_core::zip::encrypted::derive_key(salt, key);
         let mut out = Vec::with_capacity(COMPOSITE_KEY_LENGTH);
         out.extend_from_slice(&composite.aes_key);
         out.extend_from_slice(&composite.hmac_key);

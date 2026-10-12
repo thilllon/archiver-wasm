@@ -130,7 +130,7 @@ export async function signalAbortedBeforeConstruction(impl, ctx) {
   return { destroyed: archive.destroyed };
 }
 
-// deps/zip-stream/index.js:44-46 (a comment with `.length > 0` is set; PORTING.md V14: ykk throws here)
+// deps/zip-stream/index.js:44-46 (a comment with `.length > 0` is set; PORTING.md V14: port throws here)
 export async function bufferArchiveComment(impl, ctx) {
   let archive;
   try {
@@ -143,7 +143,7 @@ export async function bufferArchiveComment(impl, ctx) {
   return { thrown: null };
 }
 
-// deps/zip-stream/index.js:134-136 (PORTING.md V14: ykk delivers a TypeError through the entry callback)
+// deps/zip-stream/index.js:134-136 (PORTING.md V14: port delivers a TypeError through the entry callback)
 export async function bufferEntryComment(impl, ctx) {
   const archive = createKind(ctx, ctx.args.kind, {});
   let thrown = null;
@@ -232,13 +232,13 @@ function assertSameCrash(runs, expected) {
   assert.equal(runs.upstream.crash.name, expected.name);
   assert.equal(runs.upstream.crash.code, expected.code);
   assert.equal(runs.upstream.crash.message, expected.message);
-  assert.equal(runs.ykk.code, runs.upstream.code, `ykk did not crash: ${runs.ykk.stdout}${runs.ykk.stderr}`);
-  assert.deepStrictEqual(runs.ykk.crash, runs.upstream.crash);
+  assert.equal(runs.port.code, runs.upstream.code, `port did not crash: ${runs.port.stdout}${runs.port.stderr}`);
+  assert.deepStrictEqual(runs.port.crash, runs.upstream.crash);
 }
 
 // PORTING.md 14.2 (helper of the test: neither child died of an uncaught exception, and both printed a result)
 function assertNoCrash(runs) {
-  for (const name of ['upstream', 'ykk']) {
+  for (const name of ['upstream', 'port']) {
     const run = runs[name];
     assert.equal(run.crash, null, `${name}: uncaught ${JSON.stringify(run.crash)}`);
     assert.equal(run.code, 0, `${name}: exit code ${run.code}, signal ${run.signal}\n${run.stdout}${run.stderr}`);
@@ -248,14 +248,14 @@ function assertNoCrash(runs) {
 
 // PORTING.md 14.2 (events: the recorded sequence with payload summaries, the outcome of finalize(), the value)
 function assertSameRun(kind, runs) {
-  const { upstream, ykk } = runs;
-  assert.deepStrictEqual(eventNames(ykk.result), eventNames(upstream.result));
+  const { upstream, port } = runs;
+  assert.deepStrictEqual(eventNames(port.result), eventNames(upstream.result));
   assert.deepStrictEqual(
-    comparedEvents(kind, ykk.result.events, ['entry', 'progress', 'warning', 'error']),
+    comparedEvents(kind, port.result.events, ['entry', 'progress', 'warning', 'error']),
     comparedEvents(kind, upstream.result.events, ['entry', 'progress', 'warning', 'error'])
   );
-  assert.deepStrictEqual(ykk.result.settled, upstream.result.settled);
-  assert.deepStrictEqual(ykk.result.value, upstream.result.value);
+  assert.deepStrictEqual(port.result.settled, upstream.result.settled);
+  assert.deepStrictEqual(port.result.value, upstream.result.value);
 }
 
 // PORTING.md 3.2 V17 (an abort is an AbortError twice, from the engine and from the archive itself, and the
@@ -294,8 +294,8 @@ describe('differential: destroyed engines, comments and names out of contract, V
 
   before(async function () {
     await load('upstream');
-    await load('ykk');
-    root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'ykk-diff-destroy-')));
+    await load('port');
+    root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'archiver-wasm-diff-destroy-')));
     files = [];
     for (let i = 0; i < FILE_COUNT; i++) {
       const file = path.join(root, `file-${i}.bin`);
@@ -327,7 +327,7 @@ describe('differential: destroyed engines, comments and names out of contract, V
         const runs = await inChild('signalAbortedAtSecondEntry', { kind, files });
         assertNoCrash(runs);
         assertAborted(runs.upstream.result, 'upstream');
-        assertAborted(runs.ykk.result, 'ykk');
+        assertAborted(runs.port.result, 'port');
         assertSameRun(kind, runs);
         assert.deepStrictEqual(
           selectEvents(runs.upstream.result.events, ['entry']).map((record) => record.payload.name),
@@ -335,7 +335,7 @@ describe('differential: destroyed engines, comments and names out of contract, V
         );
         assert.deepStrictEqual(runs.upstream.result.value, { destroyed: true, entries: 2 });
         if (kind === 'zip, stored') {
-          assert.ok(runs.ykk.result.bytes.equals(runs.upstream.result.bytes), 'the bytes written before the abort differ');
+          assert.ok(runs.port.result.bytes.equals(runs.upstream.result.bytes), 'the bytes written before the abort differ');
         }
       });
 
@@ -343,7 +343,7 @@ describe('differential: destroyed engines, comments and names out of contract, V
         const runs = await inChild('signalAbortedInsideAStream', { kind });
         assertNoCrash(runs);
         assertAborted(runs.upstream.result, 'upstream');
-        assertAborted(runs.ykk.result, 'ykk');
+        assertAborted(runs.port.result, 'port');
         assertSameRun(kind, runs);
         // no 'entry', and none of the errors of an encoder that was freed
         assert.deepStrictEqual(eventNames(runs.upstream.result), ['error', 'close', 'error']);
@@ -362,7 +362,7 @@ describe('differential: destroyed engines, comments and names out of contract, V
         const runs = await inChild(name, { kind: 'json', files });
         assertNoCrash(runs);
         assertAborted(runs.upstream.result, 'upstream');
-        assertAborted(runs.ykk.result, 'ykk');
+        assertAborted(runs.port.result, 'port');
         assertSameRun('json', runs);
       }
     });
@@ -377,10 +377,10 @@ describe('differential: destroyed engines, comments and names out of contract, V
           const runs = await inChild('signalAbortedBeforeConstruction', { kind, append });
           assertNoCrash(runs);
           assertAborted(runs.upstream.result, 'upstream');
-          assertAborted(runs.ykk.result, 'ykk');
+          assertAborted(runs.port.result, 'port');
           assertSameRun(kind, runs);
           assert.equal(runs.upstream.result.bytes.length, 0);
-          assert.equal(runs.ykk.result.bytes.length, 0);
+          assert.equal(runs.port.result.bytes.length, 0);
         });
       }
     }
@@ -399,8 +399,8 @@ describe('differential: destroyed engines, comments and names out of contract, V
           const runs = await inChild('signalAbortedBeforeConstruction', { kind, append });
           assertNoCrash(runs);
           assertSameRun(kind, runs);
-          assert.deepStrictEqual(errorsOf(runs.ykk.result)[0], ABORT_ERROR);
-          assert.equal(runs.ykk.result.value.destroyed, true);
+          assert.deepStrictEqual(errorsOf(runs.port.result)[0], ABORT_ERROR);
+          assert.equal(runs.port.result.value.destroyed, true);
         }
       });
     }
@@ -410,10 +410,10 @@ describe('differential: destroyed engines, comments and names out of contract, V
     this.timeout(TEST_TIMEOUT_MS);
 
     for (const kind of ZIP_KINDS) {
-      it(`${kind}: archive option, ykk throws a TypeError from the constructor, upstream writes it`, async function () {
+      it(`${kind}: archive option, port throws a TypeError from the constructor, upstream writes it`, async function () {
         const runs = await inChild('bufferArchiveComment', { kind });
         assertNoCrash(runs);
-        const { upstream, ykk } = runs;
+        const { upstream, port } = runs;
         assert.deepStrictEqual(upstream.result.value, { thrown: null });
         assert.deepStrictEqual(upstream.result.settled, [{ label: 'finalize', state: 'fulfilled' }]);
         assert.deepStrictEqual(selectEvents(upstream.result.events, ['error', 'warning']), []);
@@ -421,18 +421,18 @@ describe('differential: destroyed engines, comments and names out of contract, V
         assert.deepStrictEqual(parsed.end.comment, Buffer.from('zz'));
         assert.deepStrictEqual(parsed.entries.map((entry) => entry.name), ['n.txt']);
 
-        assert.deepStrictEqual(ykk.result.value, {
+        assert.deepStrictEqual(port.result.value, {
           thrown: { name: 'TypeError', code: undefined, message: 'expected a string', data: undefined },
         });
-        assert.deepStrictEqual(ykk.result.events, []);
-        assert.deepStrictEqual(ykk.result.settled, []);
-        assert.equal(ykk.result.bytes.length, 0);
+        assert.deepStrictEqual(port.result.events, []);
+        assert.deepStrictEqual(port.result.settled, []);
+        assert.equal(port.result.bytes.length, 0);
       });
 
-      it(`${kind}: entry data, ykk emits a TypeError as 'error', upstream writes it`, async function () {
+      it(`${kind}: entry data, port emits a TypeError as 'error', upstream writes it`, async function () {
         const runs = await inChild('bufferEntryComment', { kind });
         assertNoCrash(runs);
-        const { upstream, ykk } = runs;
+        const { upstream, port } = runs;
         assert.deepStrictEqual(upstream.result.value, { thrown: null });
         assert.deepStrictEqual(upstream.result.settled, [{ label: 'finalize', state: 'fulfilled' }]);
         assert.deepStrictEqual(selectEvents(upstream.result.events, ['error', 'warning']), []);
@@ -440,19 +440,19 @@ describe('differential: destroyed engines, comments and names out of contract, V
         assert.deepStrictEqual(parsed.entries.map((entry) => entry.name), ['n.txt', 'm.txt']);
         assert.deepStrictEqual(parsed.entries[0].central.comment, Buffer.from('x'));
 
-        assert.deepStrictEqual(ykk.result.value, { thrown: null });
-        assert.deepStrictEqual(errorsOf(ykk.result), [
+        assert.deepStrictEqual(port.result.value, { thrown: null });
+        assert.deepStrictEqual(errorsOf(port.result), [
           { name: 'TypeError', code: undefined, message: 'expected a string', data: undefined },
         ]);
         // the first event: the entry itself is never written
-        assert.equal(ykk.result.events[0].event, 'error');
+        assert.equal(port.result.events[0].event, 'error');
         assert.deepStrictEqual(
-          selectEvents(ykk.result.events, ['entry']).map((record) => record.payload.name),
+          selectEvents(port.result.events, ['entry']).map((record) => record.payload.name),
           ['m.txt']
         );
         // an emitted 'error' unpipes the module from the archive, as for every entry error: nothing ends
-        assert.deepStrictEqual(ykk.result.settled, []);
-        assert.deepStrictEqual(selectEvents(ykk.result.events, ['end', 'close']), []);
+        assert.deepStrictEqual(port.result.settled, []);
+        assert.deepStrictEqual(selectEvents(port.result.events, ['end', 'close']), []);
       });
     }
   });
@@ -466,11 +466,11 @@ describe('differential: destroyed engines, comments and names out of contract, V
         it(`${kind}: a ${label} name of ${LONG_NAME_BYTES} bytes completes as upstream`, async function () {
           const runs = await inChild('longName', { kind, unit, count });
           assertNoCrash(runs);
-          const { upstream, ykk } = runs;
+          const { upstream, port } = runs;
           assert.deepStrictEqual(upstream.result.settled, [{ label: 'finalize', state: 'fulfilled' }]);
           assert.deepStrictEqual(selectEvents(upstream.result.events, ['error', 'warning']), []);
           assertSameRun(kind, runs);
-          for (const run of [upstream, ykk]) {
+          for (const run of [upstream, port]) {
             const fields = lengthFields(run.result.bytes, 0);
             assert.equal(fields.localName, LONG_NAME_BYTES % 65536);
             assert.equal(fields.centralName, LONG_NAME_BYTES % 65536);
@@ -481,12 +481,12 @@ describe('differential: destroyed engines, comments and names out of contract, V
           const localHeader = 30 + LONG_NAME_BYTES;
           assert.deepStrictEqual(upstream.result.bytes.subarray(30, localHeader), name);
           assert.ok(
-            ykk.result.bytes.subarray(0, localHeader).equals(upstream.result.bytes.subarray(0, localHeader)),
+            port.result.bytes.subarray(0, localHeader).equals(upstream.result.bytes.subarray(0, localHeader)),
             'the local header differs'
           );
           if (STORED_KINDS.includes(kind)) {
-            assert.ok(ykk.result.bytes.equals(upstream.result.bytes), 'the archives differ');
-            assert.equal(ykk.result.pointer, upstream.result.pointer);
+            assert.ok(port.result.bytes.equals(upstream.result.bytes), 'the archives differ');
+            assert.equal(port.result.pointer, upstream.result.pointer);
           }
         });
       }
@@ -494,33 +494,33 @@ describe('differential: destroyed engines, comments and names out of contract, V
 
     // PORTING.md 14.2 (R4): 64 MiB of text takes minutes on Node 18 and 20, so these cases are
     // registered only by destroy-abort-huge.slow.mjs.
-    if (process.env.YKK_SLOW === '1') {
+    if (process.env.ARCHIVER_WASM_SLOW === '1') {
       it(`zip, stored: a name of exactly ${MAX_TEXT} bytes is written as upstream writes it`, async function () {
         const runs = await inChild('hugeText', { kind: 'zip, stored', field: 'name', size: MAX_TEXT, settle: 0 }, { wait: 'none' });
         assertNoCrash(runs);
         assert.equal(runs.upstream.result.value.outcome, 'finalized');
         assert.equal(runs.upstream.result.value.length, 2 * MAX_TEXT + 30 + 2 + 46 + 22);
-        assert.deepStrictEqual(runs.ykk.result.value, runs.upstream.result.value);
-        assert.deepStrictEqual(eventNames(runs.ykk.result), eventNames(runs.upstream.result));
+        assert.deepStrictEqual(runs.port.result.value, runs.upstream.result.value);
+        assert.deepStrictEqual(eventNames(runs.port.result), eventNames(runs.upstream.result));
       });
 
       for (const kind of ['zip, stored', 'aes256', 'zip20']) {
         for (const field of ['name', 'comment']) {
-          it(`${kind}: a ${field} of ${MAX_TEXT + 1} bytes is an 'error' in ykk, never a wasm trap; upstream writes it`, async function () {
+          it(`${kind}: a ${field} of ${MAX_TEXT + 1} bytes is an 'error' in port, never a wasm trap; upstream writes it`, async function () {
             const runs = await inChild('hugeText', { kind, field, size: MAX_TEXT + 1, settle: SETTLE_MS }, { wait: 'none' });
             assertNoCrash(runs);
-            const { upstream, ykk } = runs;
+            const { upstream, port } = runs;
             assert.equal(upstream.result.value.outcome, 'finalized');
             assert.deepStrictEqual(selectEvents(upstream.result.events, ['error', 'warning']), []);
             assert.ok(upstream.result.value.length > (field === 'name' ? 2 : 1) * MAX_TEXT);
 
-            assert.equal(ykk.result.value.outcome, 'error');
-            assert.equal(ykk.result.value.length, 0);
-            assert.deepStrictEqual(errorsOf(ykk.result), [
+            assert.equal(port.result.value.outcome, 'error');
+            assert.equal(port.result.value.length, 0);
+            assert.deepStrictEqual(errorsOf(port.result), [
               { name: 'Error', code: undefined, message: `entry ${field} too large`, data: undefined },
             ]);
-            assert.deepStrictEqual(selectEvents(ykk.result.events, ['entry']), []);
-            assert.deepStrictEqual(ykk.result.settled, []);
+            assert.deepStrictEqual(selectEvents(port.result.events, ['entry']), []);
+            assert.deepStrictEqual(port.result.settled, []);
           });
         }
       }
@@ -530,10 +530,10 @@ describe('differential: destroyed engines, comments and names out of contract, V
   describe('R5: a deflated buffer entry completes at least one turn before upstream (V3)', function () {
     const missing = () => path.join(root, 'no-such-dir', 'missing.txt');
 
-    it("zip, deflated: ykk emits 'entry' and 'progress' before the ENOENT 'warning', upstream after it", async function () {
-      const { upstream, ykk } = await runBoth(missingFileThenBuffer, { args: { options: {}, missing: missing() } });
+    it("zip, deflated: port emits 'entry' and 'progress' before the ENOENT 'warning', upstream after it", async function () {
+      const { upstream, port } = await runBoth(missingFileThenBuffer, { args: { options: {}, missing: missing() } });
       assert.equal(upstream.error, null);
-      assert.equal(ykk.error, null);
+      assert.equal(port.error, null);
       const summary = (run) =>
         selectEvents(run.events).map((record) =>
           record.event === 'progress'
@@ -545,7 +545,7 @@ describe('differential: destroyed engines, comments and names out of contract, V
         { event: 'entry', name: 'x.txt', code: undefined },
         { event: 'progress', entries: { total: 1, processed: 1 } },
       ]);
-      assert.deepStrictEqual(summary(ykk), [
+      assert.deepStrictEqual(summary(port), [
         { event: 'entry', name: 'x.txt', code: undefined },
         { event: 'progress', entries: { total: 2, processed: 1 } },
         { event: 'warning', name: 'Error', code: 'ENOENT' },
@@ -555,41 +555,41 @@ describe('differential: destroyed engines, comments and names out of contract, V
         selectEvents(run.events, ['entry', 'warning'])
           .map((record) => JSON.stringify(record, (key, value) => (value === undefined ? '[undefined]' : value)))
           .sort();
-      assert.deepStrictEqual(sorted(ykk), sorted(upstream));
+      assert.deepStrictEqual(sorted(port), sorted(upstream));
       // bytes are unaffected: one entry, the same records apart from the deflated payload (V1)
       const u = parseZip(upstream.bytes);
-      const y = parseZip(ykk.bytes);
+      const y = parseZip(port.bytes);
       assert.deepStrictEqual(y.entries.map((entry) => entry.name), ['x.txt']);
       assert.deepStrictEqual(u.entries.map((entry) => entry.name), ['x.txt']);
       assert.deepStrictEqual(y.entries[0].local.bytes, u.entries[0].local.bytes);
     });
 
     it('zip, stored: the same scenario is equal in both', async function () {
-      const { upstream, ykk } = await runBoth(missingFileThenBuffer, {
+      const { upstream, port } = await runBoth(missingFileThenBuffer, {
         args: { options: { store: true }, missing: missing() },
       });
       assert.equal(upstream.error, null);
-      assert.equal(ykk.error, null);
-      assert.deepStrictEqual(ykk.events, upstream.events);
+      assert.equal(port.error, null);
+      assert.deepStrictEqual(port.events, upstream.events);
       assert.deepStrictEqual(eventNames(upstream), ['entry', 'progress', 'warning', 'end', 'close']);
-      assert.ok(ykk.bytes.equals(upstream.bytes), 'the archives differ');
+      assert.ok(port.bytes.equals(upstream.bytes), 'the archives differ');
     });
 
-    it('zip, deflated: abort() one turn after append() never ends in ykk and ends upstream (the window of P32)', async function () {
-      const { upstream, ykk } = await runBoth(abortAfterTurns, { hang: HANG_QUIET_MS, args: { options: {}, turns: 1 } });
+    it('zip, deflated: abort() one turn after append() never ends in port and ends upstream (the window of P32)', async function () {
+      const { upstream, port } = await runBoth(abortAfterTurns, { hang: HANG_QUIET_MS, args: { options: {}, turns: 1 } });
       assert.equal(upstream.error, null);
-      assert.equal(ykk.error, null);
+      assert.equal(port.error, null);
       // upstream: the entry has not completed, abort() waits for it and shuts down
       assert.deepStrictEqual(eventNames(upstream), ['end', 'close']);
-      // ykk: the entry completed in the turn its queue worker started, abort() falls into the window of P32
-      assert.deepStrictEqual(eventNames(ykk), ['entry', 'progress']);
+      // port: the entry completed in the turn its queue worker started, abort() falls into the window of P32
+      assert.deepStrictEqual(eventNames(port), ['entry', 'progress']);
     });
 
-    it('zip, deflated: abort() two turns after append() ends in ykk; upstream depends on the thread pool', async function () {
-      const { upstream, ykk } = await runBoth(abortAfterTurns, { hang: HANG_QUIET_MS, args: { options: {}, turns: 2 } });
+    it('zip, deflated: abort() two turns after append() ends in port; upstream depends on the thread pool', async function () {
+      const { upstream, port } = await runBoth(abortAfterTurns, { hang: HANG_QUIET_MS, args: { options: {}, turns: 2 } });
       assert.equal(upstream.error, null);
-      assert.equal(ykk.error, null);
-      assert.deepStrictEqual(eventNames(ykk), ['entry', 'progress', 'end', 'close']);
+      assert.equal(port.error, null);
+      assert.deepStrictEqual(eventNames(port), ['entry', 'progress', 'end', 'close']);
       // zlib has answered (the window of P32: never ends) or has not yet (abort() shuts down): both are upstream
       const names = eventNames(upstream);
       assert.ok(
@@ -600,13 +600,13 @@ describe('differential: destroyed engines, comments and names out of contract, V
 
     for (const turns of [0, 1, 2]) {
       it(`zip, stored: abort() ${turns} turns after append() is equal in both`, async function () {
-        const { upstream, ykk } = await runBoth(abortAfterTurns, {
+        const { upstream, port } = await runBoth(abortAfterTurns, {
           hang: HANG_QUIET_MS,
           args: { options: { store: true }, turns },
         });
         assert.equal(upstream.error, null);
-        assert.equal(ykk.error, null);
-        assert.deepStrictEqual(ykk.events, upstream.events);
+        assert.equal(port.error, null);
+        assert.deepStrictEqual(port.events, upstream.events);
         assert.deepStrictEqual(
           eventNames(upstream),
           [['end', 'close'], ['entry', 'progress'], ['entry', 'progress', 'end', 'close']][turns]

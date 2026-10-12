@@ -1,12 +1,12 @@
 import { Transform } from 'node:stream';
 import type { TransformCallback } from 'node:stream';
 import { wasm, EMPTY, MAX_CHUNK, toBuffer } from './wasm.js';
-import type { YkkWasm } from './wasm.js';
+import type { ArchiverWasm } from './wasm.js';
 import { validateZlibOptions, resolveLevel, resolveStrategy, GZIP_OS } from './zlib-options.js';
 
 // node-archiver/lib/plugins/tar.js:28 (the stream zlib.createGzip returns, PORTING.md 7.7)
 export class Gzip extends Transform {
-  _wasm: InstanceType<YkkWasm['WasmGzip']>;
+  _wasm: InstanceType<ArchiverWasm['WasmGzip']>;
   _finished = false;
 
   // node-archiver/lib/plugins/tar.js:28 (the zlib.Gzip constructor, PORTING.md 7.7)

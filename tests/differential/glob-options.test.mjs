@@ -5,7 +5,7 @@
 // The scenario is exported so that a child process can run it: a case about the working directory
 // (cwd absent or relative) needs a process that stands in the tree.
 //
-// Each case compares ykk with upstream (the json document with its entry objects in order, the events,
+// Each case compares port with upstream (the json document with its entry objects in order, the events,
 // and for two cases the bytes of a stored zip and of a tar) and with the list written in the case, so
 // that an option both stacks ignore still fails.
 
@@ -33,7 +33,7 @@ let root;
 // link-file -> a.txt, link-dir -> sub/deep (a directory that holds no link), broken -> missing.txt.
 // No two names differ by case only, so the tree is the same on a case-insensitive file system.
 function makeTree() {
-  const tree = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'ykk-diff-glob-')));
+  const tree = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'archiver-wasm-diff-glob-')));
   const write = (rel, data, mode) => {
     const target = path.join(tree, rel);
     fs.mkdirSync(path.dirname(target), { recursive: true });
@@ -111,19 +111,19 @@ function maskVolatile(bytes) {
 }
 
 // PORTING.md 14.2 (class D with stats: the document, the entry objects in order, key order included, and exact event sequences)
-function assertSameFiles({ upstream, ykk }) {
+function assertSameFiles({ upstream, port }) {
   assert.strictEqual(upstream.error, null);
-  assert.deepStrictEqual(ykk.error, upstream.error);
+  assert.deepStrictEqual(port.error, upstream.error);
   const expected = parseFiles(upstream.bytes);
-  const actual = parseFiles(ykk.bytes);
+  const actual = parseFiles(port.bytes);
   assert.deepStrictEqual(
     actual.map((file) => JSON.stringify(file)),
     expected.map((file) => JSON.stringify(file))
   );
-  assert.strictEqual(maskVolatile(ykk.bytes), maskVolatile(upstream.bytes));
-  assert.deepStrictEqual(selectEvents(ykk.events), selectEvents(upstream.events));
+  assert.strictEqual(maskVolatile(port.bytes), maskVolatile(upstream.bytes));
+  assert.deepStrictEqual(selectEvents(port.events), selectEvents(upstream.events));
   assert.strictEqual(upstream.pointer, upstream.bytes.length);
-  assert.strictEqual(ykk.pointer, ykk.bytes.length);
+  assert.strictEqual(port.pointer, port.bytes.length);
   return actual;
 }
 
@@ -140,18 +140,18 @@ async function globJson(pattern, options, data) {
 
 // one glob() into a json archive, in a child process that stands in `cwd`
 async function globJsonIn(cwd, pattern, options) {
-  const { upstream, ykk } = await runBothInChild(scenarioReference(import.meta.url, 'globOnce'), {
+  const { upstream, port } = await runBothInChild(scenarioReference(import.meta.url, 'globOnce'), {
     cwd,
     args: { format: 'json', pattern, options },
     clock: CLOCK, endTimeout: END_TIMEOUT,
     timeout: 8000,
   });
-  for (const child of [upstream, ykk]) {
+  for (const child of [upstream, port]) {
     assert.strictEqual(child.code, 0, child.stderr);
     assert.strictEqual(child.crash, null);
     assert.strictEqual(child.unsettled, false);
   }
-  return assertSameFiles({ upstream: upstream.result, ykk: ykk.result });
+  return assertSameFiles({ upstream: upstream.result, port: port.result });
 }
 
 // the source path of every entry, relative to the tree
@@ -460,27 +460,27 @@ describe('differential: glob() options', function () {
     });
 
     it('stored zip', async function () {
-      const { upstream, ykk } = await runBoth(globOnce, {
+      const { upstream, port } = await runBoth(globOnce, {
         args: { format: 'zip', pattern, options: options(), data: { date: DATE } },
         clock: CLOCK, endTimeout: END_TIMEOUT,
       });
       assert.strictEqual(upstream.error, null);
-      assert.deepStrictEqual(ykk.error, upstream.error);
-      assert.deepStrictEqual(ykk.bytes, upstream.bytes);
-      assert.deepStrictEqual(selectEvents(ykk.events), selectEvents(upstream.events));
-      assert.deepStrictEqual(parseZip(ykk.bytes).entries.map((entry) => entry.name).sort(), expected);
+      assert.deepStrictEqual(port.error, upstream.error);
+      assert.deepStrictEqual(port.bytes, upstream.bytes);
+      assert.deepStrictEqual(selectEvents(port.events), selectEvents(upstream.events));
+      assert.deepStrictEqual(parseZip(port.bytes).entries.map((entry) => entry.name).sort(), expected);
     });
 
     it('tar', async function () {
-      const { upstream, ykk } = await runBoth(globOnce, {
+      const { upstream, port } = await runBoth(globOnce, {
         args: { format: 'tar', pattern, options: options() },
         clock: CLOCK, endTimeout: END_TIMEOUT,
       });
       assert.strictEqual(upstream.error, null);
-      assert.deepStrictEqual(ykk.error, upstream.error);
-      assert.deepStrictEqual(ykk.bytes, upstream.bytes);
-      assert.deepStrictEqual(selectEvents(ykk.events), selectEvents(upstream.events));
-      assert.deepStrictEqual(parseTar(ykk.bytes).entries.map((entry) => entry.name).sort(), expected);
+      assert.deepStrictEqual(port.error, upstream.error);
+      assert.deepStrictEqual(port.bytes, upstream.bytes);
+      assert.deepStrictEqual(selectEvents(port.events), selectEvents(upstream.events));
+      assert.deepStrictEqual(parseTar(port.bytes).entries.map((entry) => entry.name).sort(), expected);
     });
   });
 });

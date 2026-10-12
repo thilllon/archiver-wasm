@@ -77,10 +77,10 @@ async function assertSameEntry(u, y) {
 }
 
 // PORTING.md 14.2 (comparison rules, deflated zip, class D; events: the exact sequence)
-async function assertSameZip(upstream, ykk) {
-  assert.deepStrictEqual(ykk.error, upstream.error);
+async function assertSameZip(upstream, port) {
+  assert.deepStrictEqual(port.error, upstream.error);
   const u = parseZip(upstream.bytes);
-  const y = parseZip(ykk.bytes);
+  const y = parseZip(port.bytes);
   assert.deepStrictEqual(y.entries.map((entry) => entry.name), u.entries.map((entry) => entry.name));
   for (let i = 0; i < u.entries.length; i++) {
     await assertSameEntry(u.entries[i], y.entries[i]);
@@ -89,18 +89,18 @@ async function assertSameZip(upstream, ykk) {
   assert.deepStrictEqual(maskEndRecords(y), maskEndRecords(u));
   assertEndRecords(u);
   assertEndRecords(y);
-  assert.deepStrictEqual(comparedEvents(ykk), comparedEvents(upstream));
+  assert.deepStrictEqual(comparedEvents(port), comparedEvents(upstream));
   return { u, y };
 }
 
 // PORTING.md 14.2 (comparison rules, stored encrypted zip: whole-archive byte equality, events, pointer)
-function assertSameBytes(upstream, ykk) {
-  assert.deepStrictEqual(ykk.error, upstream.error);
-  assert.deepStrictEqual(ykk.bytes, upstream.bytes);
-  assert.deepStrictEqual(comparedEvents(ykk), comparedEvents(upstream));
-  assert.equal(ykk.pointer, upstream.pointer);
-  assert.equal(ykk.pointer, ykk.bytes.length);
-  return { u: parseZip(upstream.bytes), y: parseZip(ykk.bytes) };
+function assertSameBytes(upstream, port) {
+  assert.deepStrictEqual(port.error, upstream.error);
+  assert.deepStrictEqual(port.bytes, upstream.bytes);
+  assert.deepStrictEqual(comparedEvents(port), comparedEvents(upstream));
+  assert.equal(port.pointer, upstream.pointer);
+  assert.equal(port.pointer, port.bytes.length);
+  return { u: parseZip(upstream.bytes), y: parseZip(port.bytes) };
 }
 
 // PORTING.md 14.2 (helper of the test: the entries of both archives, for an assertion made on each)
@@ -119,8 +119,8 @@ describe('differential: zip (aes256)', function () {
     };
 
     it('stored', async function () {
-      const { upstream, ykk } = await runBoth(aes(() => ({ salt: SALT, store: true }), add));
-      const zips = assertSameBytes(upstream, ykk);
+      const { upstream, port } = await runBoth(aes(() => ({ salt: SALT, store: true }), add));
+      const zips = assertSameBytes(upstream, port);
       const entries = zips.y.entries;
       assert.deepStrictEqual(entries.map((entry) => entry.local.versionNeeded), [51, 51, 51, 51, 51]);
       assert.deepStrictEqual(entries.map((entry) => entry.central.versionNeeded), [51, 51, 51, 51, 51]);
@@ -146,8 +146,8 @@ describe('differential: zip (aes256)', function () {
     });
 
     it('deflated', async function () {
-      const { upstream, ykk } = await runBoth(aes(() => ({ salt: SALT }), add));
-      const zips = await assertSameZip(upstream, ykk);
+      const { upstream, port } = await runBoth(aes(() => ({ salt: SALT }), add));
+      const zips = await assertSameZip(upstream, port);
       for (const parsed of both(zips)) {
         const entries = parsed.entries;
         assert.deepStrictEqual(entries.map((entry) => entry.local.versionNeeded), [51, 51, 51, 51, 51]);
@@ -165,8 +165,8 @@ describe('differential: zip (aes256)', function () {
     });
 
     it('deflated, zlib.level 9', async function () {
-      const { upstream, ykk } = await runBoth(aes(() => ({ salt: SALT, zlib: { level: 9 } }), add));
-      await assertSameZip(upstream, ykk);
+      const { upstream, port } = await runBoth(aes(() => ({ salt: SALT, zlib: { level: 9 } }), add));
+      await assertSameZip(upstream, port);
     });
   });
 
@@ -178,10 +178,10 @@ describe('differential: zip (aes256)', function () {
     };
 
     it('stored', async function () {
-      const { upstream, ykk } = await runBoth(
+      const { upstream, port } = await runBoth(
         aes(() => ({ salt: SALT, store: true, forceZip64: true, comment: 'archive ü' }), add)
       );
-      const zips = assertSameBytes(upstream, ykk);
+      const zips = assertSameBytes(upstream, port);
       const parsed = zips.y;
       assert.notEqual(parsed.zip64End, null);
       assert.notEqual(parsed.zip64Locator, null);
@@ -196,10 +196,10 @@ describe('differential: zip (aes256)', function () {
     });
 
     it('deflated', async function () {
-      const { upstream, ykk } = await runBoth(
+      const { upstream, port } = await runBoth(
         aes(() => ({ salt: SALT, forceZip64: true, comment: 'an ASCII archive comment' }), add)
       );
-      const zips = await assertSameZip(upstream, ykk);
+      const zips = await assertSameZip(upstream, port);
       for (const parsed of both(zips)) {
         assert.notEqual(parsed.zip64End, null);
         assert.equal(parsed.entries[0].descriptor.length, 16);
@@ -217,38 +217,38 @@ describe('differential: zip (aes256)', function () {
     it('salt as a Buffer', async function () {
       const salt = Buffer.alloc(16, 0xa5);
       const stored = await runBoth(aes(() => ({ salt: Buffer.from(salt), store: true }), add));
-      const zips = assertSameBytes(stored.upstream, stored.ykk);
+      const zips = assertSameBytes(stored.upstream, stored.port);
       for (const entry of zips.y.entries) {
         assert.deepStrictEqual(entry.payload.subarray(0, 16), salt);
       }
       const deflated = await runBoth(aes(() => ({ salt: Buffer.from(salt) }), add));
-      await assertSameZip(deflated.upstream, deflated.ykk);
+      await assertSameZip(deflated.upstream, deflated.port);
     });
 
     it('salt as a string', async function () {
       const salt = '0123456789abcdef';
       const stored = await runBoth(aes(() => ({ salt, store: true }), add));
-      const zips = assertSameBytes(stored.upstream, stored.ykk);
+      const zips = assertSameBytes(stored.upstream, stored.port);
       for (const entry of zips.y.entries) {
         assert.deepStrictEqual(entry.payload.subarray(0, 16), Buffer.from(salt));
         assertSizes(entry);
       }
       const deflated = await runBoth(aes(() => ({ salt }), add));
-      await assertSameZip(deflated.upstream, deflated.ykk);
+      await assertSameZip(deflated.upstream, deflated.port);
     });
 
     it('a salt of another length is written with its own length (ENCRYPTED-060)', async function () {
       const salt = Buffer.alloc(8, 0x5a);
-      const { upstream, ykk } = await runBoth(aes(() => ({ salt: Buffer.from(salt), store: true }), add));
-      const zips = assertSameBytes(upstream, ykk);
+      const { upstream, port } = await runBoth(aes(() => ({ salt: Buffer.from(salt), store: true }), add));
+      const zips = assertSameBytes(upstream, port);
       assert.equal(zips.y.entries[0].payload.length, 8 + 2 + TEXT.length + 10);
       assert.equal(zips.y.entries[0].central.compressedSize, 8 + 2 + TEXT.length + 10);
       assert.deepStrictEqual(zips.y.entries[0].payload.subarray(0, 8), salt);
     });
 
     it('no salt: structure and lengths', async function () {
-      const { upstream, ykk } = await runBoth(aes(() => ({}), add));
-      const zips = await assertSameZip(upstream, ykk);
+      const { upstream, port } = await runBoth(aes(() => ({}), add));
+      const zips = await assertSameZip(upstream, port);
       assert.deepStrictEqual(
         [zips.y.entries[0].payload.length, zips.y.entries[2].payload.length],
         [zips.u.entries[0].payload.length, zips.u.entries[2].payload.length]
@@ -268,7 +268,7 @@ for (const format of ['aes256', 'zip20']) {
     const options = { encryptionMethod: format, password: PASSWORD, store: true, ...extra };
     if (format === 'aes256') {
       options.salt = Buffer.from(SALT);
-    } else if (impl.name === 'ykk') {
+    } else if (impl.name === 'port') {
       options.zip20Header = Buffer.from(ctx.zip20Header);
     }
     return { options, archive: ctx.track(impl.archiver.create('zip-encrypted', options)) };
@@ -276,7 +276,7 @@ for (const format of ['aes256', 'zip20']) {
 
   describe(`differential: A4 the archiver 7 surface (V15), ${format}`, function () {
     it('(a) caller options and entry data are not mutated; "entry" payload keys', async function () {
-      const { upstream, ykk } = await runBoth(
+      const { upstream, port } = await runBoth(
         async (impl, ctx) => {
           const { options, archive } = create(impl, ctx);
           const data = { name: 'a.txt', date: DATE };
@@ -290,14 +290,14 @@ for (const format of ['aes256', 'zip20']) {
 
       assert.equal(upstream.value.options.includes('highWaterMark'), true);
       assert.equal(upstream.value.options.includes('statConcurrency'), true);
-      assert.equal(ykk.value.options.includes('highWaterMark'), false);
-      assert.equal(ykk.value.options.includes('statConcurrency'), false);
+      assert.equal(port.value.options.includes('highWaterMark'), false);
+      assert.equal(port.value.options.includes('statConcurrency'), false);
 
       assert.deepStrictEqual(upstream.value.data, [
         'name', 'date', 'type', 'mode', 'prefix', 'sourcePath', 'stats', 'sourceType', 'namePrependSlash', 'linkname',
         'store', 'comment',
       ]);
-      assert.deepStrictEqual(ykk.value.data, ['name', 'date']);
+      assert.deepStrictEqual(port.value.data, ['name', 'date']);
 
       const keys = (run) => selectEvents(run.events, ['entry']).map((record) => Object.keys(record.payload));
       assert.deepStrictEqual(keys(upstream), [
@@ -307,18 +307,18 @@ for (const format of ['aes256', 'zip20']) {
         ],
         ['type', 'name', 'linkname', 'sourceType', 'namePrependSlash', 'date', 'mode', 'store', 'comment'],
       ]);
-      assert.deepStrictEqual(keys(ykk), [
+      assert.deepStrictEqual(keys(port), [
         ['type', 'name', 'date', 'mode', 'prefix', 'sourcePath', 'stats', 'sourceType'],
         ['type', 'name', 'linkname', 'sourceType'],
       ]);
 
-      assert.deepStrictEqual(comparedEvents(ykk), comparedEvents(upstream));
-      assert.deepStrictEqual(ykk.bytes, upstream.bytes);
-      assert.equal(ykk.pointer, upstream.pointer);
+      assert.deepStrictEqual(comparedEvents(port), comparedEvents(upstream));
+      assert.deepStrictEqual(port.bytes, upstream.bytes);
+      assert.equal(port.pointer, upstream.pointer);
     });
 
     it('(b) mode: undefined is not defaulted', async function () {
-      const { upstream, ykk } = await runBoth(
+      const { upstream, port } = await runBoth(
         async (impl, ctx) => {
           const { archive } = create(impl, ctx);
           archive.append(TEXT, { name: 'a.txt', date: DATE, mode: undefined });
@@ -327,7 +327,7 @@ for (const format of ['aes256', 'zip20']) {
         { random: ZIP20_HEADER }
       );
       const u = parseZip(upstream.bytes).entries[0];
-      const y = parseZip(ykk.bytes).entries[0];
+      const y = parseZip(port.bytes).entries[0];
       assert.equal(u.central.versionMadeBy, 0x032d);
       assert.equal(u.central.externalAttributes, 0x81a40020);
       assert.equal(y.central.versionMadeBy, 0x002d);
@@ -344,7 +344,7 @@ for (const format of ['aes256', 'zip20']) {
     });
 
     it('(c) a duck-typed stream source is accepted', async function () {
-      const { upstream, ykk } = await runBoth(
+      const { upstream, port } = await runBoth(
         async (impl, ctx) => {
           const { archive } = create(impl, ctx);
           const duck = {
@@ -375,11 +375,11 @@ for (const format of ['aes256', 'zip20']) {
       assert.deepStrictEqual(upstreamErrors[0].payload.data, { name: 'duck.txt' });
       assert.equal(upstream.bytes.length, 0);
 
-      assert.deepStrictEqual(selectEvents(ykk.events, ['error']), []);
-      const entries = parseZip(ykk.bytes).entries;
+      assert.deepStrictEqual(selectEvents(port.events, ['error']), []);
+      const entries = parseZip(port.bytes).entries;
       assert.deepStrictEqual(entries.map((entry) => entry.name), ['duck.txt']);
       assert.deepStrictEqual(await entryData(entries[0], PASSWORD), TEXT);
-      assert.equal(selectEvents(ykk.events, ['entry'])[0].payload.sourceType, 'stream');
+      assert.equal(selectEvents(port.events, ['entry'])[0].payload.sourceType, 'stream');
     });
   });
 }

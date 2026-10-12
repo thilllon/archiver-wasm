@@ -1,6 +1,6 @@
-# crates/ykk-core/Cargo.toml
+# crates/archiver-core/Cargo.toml
 [package]
-name = "ykk-core"
+name = "archiver-core"
 version = "0.1.0"
 edition = "2021"
 

@@ -2,7 +2,7 @@
 // PORTING.md 14.5: runs both upstream suites with mocha's json reporter and fails unless
 // every spec file of tests/upstream/LEDGER.tsv ran its exact number of tests with none
 // pending and none failing; then fails unless `cargo test -- --list` prints every test named
-// in crates/ykk-core/tests/LEDGER.tsv for the test binary of the file its row names, and
+// in crates/archiver-core/tests/LEDGER.tsv for the test binary of the file its row names, and
 // `--list --ignored` prints none of them.
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -63,7 +63,7 @@ for (const line of ledgerRows.slice(1)) {
   ledger.get(suite).set(file, Number(tests));
 }
 
-const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'ykk-test-ledger-'));
+const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'archiver-wasm-test-ledger-'));
 
 function runSuite({ suite, args, total }) {
   const suiteDir = fs.realpathSync(path.join(vendored, suite));
@@ -150,7 +150,7 @@ try {
 // PORTING.md 14.3, 14.5: one required cargo test per row, as `cargo test -- --list` prints it
 // for the test binary of the file in the second column (the library's unit tests for
 // crates/<package>/src/**, the integration test for crates/<package>/tests/<name>.rs).
-const cargoLedger = 'crates/ykk-core/tests/LEDGER.tsv';
+const cargoLedger = 'crates/archiver-core/tests/LEDGER.tsv';
 const cargoRows = readRows(path.join(root, cargoLedger));
 if (cargoRows[0] !== 'test\tfile') {
   problems.push(cargoLedger + ': the first row must be the header test, file');

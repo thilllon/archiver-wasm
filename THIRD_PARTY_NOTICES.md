@@ -1,6 +1,6 @@
 # Third-party notices
 
-ykk is a port. Its source is derived from the projects below. Each is used under its own
+archiver-wasm is a port. Its source is derived from the projects below. Each is used under its own
 license and keeps its copyright.
 
 ## MIT License
@@ -39,7 +39,7 @@ SOFTWARE.
 - readdir-glob: Copyright 2020 Yann Armelin. `src/readdir-glob.ts` is a TypeScript
   translation of its `index.js`; the file was changed by adding types.
 - crc-32: Copyright (C) 2014-present SheetJS LLC. Only the behavior of its `buf` function
-  is reproduced, in `crates/ykk-core/src/crc32.rs`.
+  is reproduced, in `crates/archiver-core/src/crc32.rs`.
 
                                  Apache License
                            Version 2.0, January 2004

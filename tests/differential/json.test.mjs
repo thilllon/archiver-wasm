@@ -1,5 +1,5 @@
 // tests/differential/json.test.mjs
-// Differential cases J1 to J3 of PORTING.md 14.2: the json format of the upstream oracle and of ykk.
+// Differential cases J1 to J3 of PORTING.md 14.2: the json format of the upstream oracle and of port.
 // The scenarios are exported so that a child process can run them; the fs-backed ones take the fixture
 // tree of makeTree() as ctx.args.root.
 
@@ -37,7 +37,7 @@ function streamOf(chunks) {
 
 // PORTING.md 14.2 (determinism: modes are set by chmod, times by lutimes)
 function makeTree() {
-  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'ykk-diff-json-')));
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'archiver-wasm-diff-json-')));
   const write = (rel, data, mode) => {
     const target = path.join(root, rel);
     fs.mkdirSync(path.dirname(target), { recursive: true });
@@ -152,19 +152,19 @@ function maskVolatile(bytes) {
 }
 
 // PORTING.md 14.2 (class D with stats: the document, the entry objects in order, key order included, and exact event sequences)
-function assertSameFiles({ upstream, ykk }) {
+function assertSameFiles({ upstream, port }) {
   assert.strictEqual(upstream.error, null);
-  assert.deepStrictEqual(ykk.error, upstream.error);
+  assert.deepStrictEqual(port.error, upstream.error);
   const expected = parseFiles(upstream.bytes);
-  const actual = parseFiles(ykk.bytes);
+  const actual = parseFiles(port.bytes);
   assert.deepStrictEqual(
     actual.map((file) => JSON.stringify(file)),
     expected.map((file) => JSON.stringify(file))
   );
-  assert.strictEqual(maskVolatile(ykk.bytes), maskVolatile(upstream.bytes));
-  assert.deepStrictEqual(selectEvents(ykk.events), selectEvents(upstream.events));
+  assert.strictEqual(maskVolatile(port.bytes), maskVolatile(upstream.bytes));
+  assert.deepStrictEqual(selectEvents(port.events), selectEvents(upstream.events));
   assert.strictEqual(upstream.pointer, upstream.bytes.length);
-  assert.strictEqual(ykk.pointer, ykk.bytes.length);
+  assert.strictEqual(port.pointer, port.bytes.length);
   return actual;
 }
 
@@ -190,15 +190,15 @@ describe('differential: json', function () {
   });
 
   it('J1: buffer, string and stream sources, key order, unsigned crc32, caller keys', async function () {
-    const { upstream, ykk } = await runBoth(j1);
+    const { upstream, port } = await runBoth(j1);
     assert.strictEqual(upstream.error, null);
-    assert.deepStrictEqual(ykk.error, upstream.error);
-    assert.strictEqual(ykk.bytes.toString('utf8'), upstream.bytes.toString('utf8'));
-    assert.ok(ykk.bytes.equals(upstream.bytes));
-    assert.deepStrictEqual(selectEvents(ykk.events), selectEvents(upstream.events));
-    assert.strictEqual(ykk.pointer, upstream.pointer);
-    assert.strictEqual(ykk.pointer, ykk.bytes.length);
-    for (const bytes of [upstream.bytes, ykk.bytes]) {
+    assert.deepStrictEqual(port.error, upstream.error);
+    assert.strictEqual(port.bytes.toString('utf8'), upstream.bytes.toString('utf8'));
+    assert.ok(port.bytes.equals(upstream.bytes));
+    assert.deepStrictEqual(selectEvents(port.events), selectEvents(upstream.events));
+    assert.strictEqual(port.pointer, upstream.pointer);
+    assert.strictEqual(port.pointer, port.bytes.length);
+    for (const bytes of [upstream.bytes, port.bytes]) {
       const files = JSON.parse(bytes.toString('utf8'));
       assert.strictEqual(files.length, 17);
       // TAR-JSON-117
@@ -340,21 +340,21 @@ describe('differential: json', function () {
   });
 
   it('J3: several fs sources, compared per entry (class N)', async function () {
-    const { upstream, ykk } = await runBoth(j3, { args: { root } });
+    const { upstream, port } = await runBoth(j3, { args: { root } });
     assert.strictEqual(upstream.error, null);
-    assert.deepStrictEqual(ykk.error, upstream.error);
+    assert.deepStrictEqual(port.error, upstream.error);
     const expected = filesByName(upstream.bytes);
-    const actual = filesByName(ykk.bytes);
+    const actual = filesByName(port.bytes);
     assert.deepStrictEqual([...actual.keys()].sort(), [...expected.keys()].sort());
     assert.strictEqual(expected.size, 13);
     for (const [name, file] of expected) {
       assert.strictEqual(actual.get(name), file);
     }
     assert.deepStrictEqual(
-      sortEvents(selectEvents(ykk.events, ['entry', 'warning', 'error'])),
+      sortEvents(selectEvents(port.events, ['entry', 'warning', 'error'])),
       sortEvents(selectEvents(upstream.events, ['entry', 'warning', 'error']))
     );
     assert.strictEqual(selectEvents(upstream.events, ['warning']).length, 1);
-    assert.strictEqual(selectEvents(ykk.events, ['progress']).length, selectEvents(upstream.events, ['progress']).length);
+    assert.strictEqual(selectEvents(port.events, ['progress']).length, selectEvents(upstream.events, ['progress']).length);
   });
 });

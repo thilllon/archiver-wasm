@@ -1,4 +1,4 @@
-// crates/ykk-core/src/zip/mod.rs   (port of compress-commons.js barrel; written by unit rs-zip-entry)
+// crates/archiver-core/src/zip/mod.rs   (port of compress-commons.js barrel; written by unit rs-zip-entry)
 pub mod archive_output_stream;
 pub mod constants;
 pub mod encrypted;
