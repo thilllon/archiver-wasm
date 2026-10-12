@@ -23,8 +23,8 @@ env:
   WASM_PACK_VERSION: 0.15.0 # PORTING.md 12.3, fixed by the toolchain gate (2.2)
 
 jobs:
-  # Decides what this run does, with a read-only token. With pending Changesets it writes the
-  # next version and hands the result to propose as a patch (changed=true). Without them it
+  # Decides what this run does, with a read-only token. With pending Changesets it works out
+  # the next version and the changelog and hands them to propose (changed=true). Without them it
   # asks the registry whether the version of package.json is already served (publish=true
   # when it is not).
   prepare:
@@ -71,7 +71,9 @@ jobs:
           if git diff --cached --quiet; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
           else
-            git diff --cached --binary > "$RUNNER_TEMP/version.patch"
+            mkdir "$RUNNER_TEMP/version"
+            cp CHANGELOG.md "$RUNNER_TEMP/version/CHANGELOG.md"
+            git diff --cached --name-only --diff-filter=D -- .changeset > "$RUNNER_TEMP/version/consumed.txt"
             echo "changed=true" >> "$GITHUB_OUTPUT"
             echo "next=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
           fi
@@ -79,29 +81,16 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: steps.prepare.outputs.changed == 'true'
         with:
-          name: version-patch
-          path: ${{ runner.temp }}/version.patch
+          name: version
+          path: ${{ runner.temp }}/version
           if-no-files-found: error
           retention-days: 7
 
-      - name: Ask the registry whether this version is already published
-        id: registry
-        if: steps.prepare.outputs.changed == 'false'
-        run: |
-          name=$(node -p "require('./package.json').name")
-          version=$(node -p "require('./package.json').version")
-          published=$(npm view "$name" versions --json)
-          if node -e "const v = JSON.parse(process.argv[1]); process.exit([].concat(v).includes(process.argv[2]) ? 0 : 1)" "$published" "$version"; then
-            echo "$name@$version is already on npm; nothing to publish."
-            echo "publish=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "$name@$version is not on npm yet."
-            echo "publish=true" >> "$GITHUB_OUTPUT"
-          fi
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-
-  # The only job that pushes a branch. It runs no repository code and installs nothing: it
-  # applies the patch that prepare wrote, so no script or dependency ever sees a write token.
+  # The only job that pushes a branch. prepare ran dependencies, so nothing it produced is
+  # trusted to describe a change: this job takes three things from it, the version number, the
+  # changelog text and the names of the consumed Changesets, checks each, and writes the
+  # version itself. It installs nothing; the one script it runs is scripts/sync-version.mjs of
+  # the event commit, which imports only Node built-ins.
   propose:
     needs: prepare
     if: needs.prepare.outputs.changed == 'true'
@@ -125,40 +114,56 @@ jobs:
 
       - uses: actions/download-artifact@v4
         with:
-          name: version-patch
-          path: ${{ runner.temp }}/version-patch
+          name: version
+          path: ${{ runner.temp }}/version
 
-      - name: Create or refresh the version pull request
-        id: pr
+      - name: Write the version commit
         run: |
+          from="$RUNNER_TEMP/version"
           test "$(git rev-parse HEAD)" = "$BASE_SHA"
           # A re-run of an old run must not open a version pull request against a newer main.
           test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)" = "$BASE_SHA" || { echo 'main has moved since this run started; the release run of the newer push takes over.'; exit 1; }
           [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          git switch --force-create automation/releases
+
+          # The consumed Changesets: tracked files of .changeset with plain names, removed.
+          test -s "$from/consumed.txt"
+          while IFS= read -r file; do
+            [[ "$file" =~ ^\.changeset/[A-Za-z0-9_-]+\.md$ ]] && [ "$file" != .changeset/README.md ]
+            git rm --quiet -- "$file"
+          done < "$from/consumed.txt"
+
+          # The changelog: text, of a sane size, with no NUL byte.
+          test -f "$from/CHANGELOG.md" && test ! -L "$from/CHANGELOG.md"
+          test "$(wc -c < "$from/CHANGELOG.md")" -lt 1048576
+          tr -d '\000' < "$from/CHANGELOG.md" | cmp --silent - "$from/CHANGELOG.md"
+          grep --quiet --fixed-strings --line-regexp "## $VERSION" "$from/CHANGELOG.md"
+          cp "$from/CHANGELOG.md" CHANGELOG.md
+
+          # The version: written here, into the fields that hold it and nowhere else.
+          node -e '
+            const fs = require("fs");
+            const version = process.env.VERSION;
+            const manifest = JSON.parse(fs.readFileSync("package.json", "utf8"));
+            manifest.version = version;
+            fs.writeFileSync("package.json", JSON.stringify(manifest, null, 2) + "\n");
+            const lock = JSON.parse(fs.readFileSync("package-lock.json", "utf8"));
+            lock.version = version;
+            lock.packages[""].version = version;
+            fs.writeFileSync("package-lock.json", JSON.stringify(lock, null, 2) + "\n");
+          '
+          node scripts/sync-version.mjs
+          node scripts/sync-version.mjs --check
+
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          # The patch comes from a job that ran dependencies. It may only touch the files a
-          # version step writes, as ordinary files: nothing executable, no link, no workflow.
-          patch="$RUNNER_TEMP/version-patch/version.patch"
-          allowed='^(\.changeset/[A-Za-z0-9._-]+\.md|CHANGELOG\.md|package\.json|package-lock\.json|Cargo\.lock|crates/archiver-(core|wasm)/Cargo\.toml|PORTING\.md)$'
-          git apply --numstat "$patch" | cut -f3- > "$RUNNER_TEMP/touched" # an unusual name comes out quoted and fails the match
-          test -s "$RUNNER_TEMP/touched"
-          if grep --invert-match --extended-regexp "$allowed" "$RUNNER_TEMP/touched"; then
-            echo 'the version patch touches a file outside the allowed set' >&2
-            exit 1
-          fi
-          if grep --extended-regexp '^(new file mode|old mode|new mode|deleted file mode) ' "$patch" | grep --invert-match --extended-regexp ' 100644$'; then
-            echo 'the version patch creates or changes a file that is not a plain 100644 file' >&2
-            exit 1
-          fi
-          if grep --quiet --extended-regexp '^(rename|copy) (from|to) ' "$patch"; then
-            echo 'the version patch renames or copies a file' >&2
-            exit 1
-          fi
-          git switch --force-create automation/releases
-          git apply --index "$patch"
+          git add --all
           git commit --message "chore(release): $VERSION"
           git push --force origin automation/releases
+
+      - name: Create or refresh the version pull request
+        id: pr
+        run: |
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           echo "tree=$(git rev-parse 'HEAD^{tree}')" >> "$GITHUB_OUTPUT"
           pr=$(gh pr list --head automation/releases --base main --state open --json number,isCrossRepository --jq '[.[] | select(.isCrossRepository | not)][0].number // empty')

@@ -5211,13 +5211,15 @@ this guide, and CI fails on a copy that disagrees (`--check`).
 The jobs, in order:
 
 - `prepare` checks out the event commit with a read-only token. With pending Changesets it
-  runs `changeset version` (which consumes them and writes `CHANGELOG.md`),
-  `scripts/sync-version.mjs` and `npm install --package-lock-only`, and uploads the result
-  as a patch. Without them it asks the registry whether the version of `package.json` is
-  already served.
-- `propose` (pending Changesets only) is the only job that pushes a branch. It installs
-  nothing and runs no repository code: it applies the patch, commits it to
-  `automation/releases` and opens or refreshes the version pull request.
+  runs `changeset version` (which consumes them and writes `CHANGELOG.md`) and uploads three
+  things: the next version, the changelog and the names of the consumed Changesets. Without
+  them it asks the registry whether the version of `package.json` is already served.
+- `propose` (pending Changesets only) is the only job that pushes a branch. `prepare` ran
+  dependencies, so `propose` applies nothing it produced: it checks the version shape, the
+  changelog (text, with the heading of that version) and the Changeset names, removes those
+  Changesets, writes the version into `package.json` and `package-lock.json` itself, runs
+  `scripts/sync-version.mjs` of the event commit (Node built-ins only), commits to
+  `automation/releases` and opens or refreshes the version pull request. It installs nothing.
 - `validate` (version pull request only). A pull request opened with `GITHUB_TOKEN` only gets
   a `pull_request` run that waits for approval and never runs a job, so the whole matrix of `ci.yml` is dispatched on the version commit, with the
   expected commit and a unique run key, and awaited.
