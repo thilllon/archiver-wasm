@@ -2,4 +2,4 @@
 pub mod headers;
 pub mod pack;
 pub use headers::Header;
-pub use pack::{overflow, Pack, END_OF_TAR};
+pub use pack::{overflow, Pack};

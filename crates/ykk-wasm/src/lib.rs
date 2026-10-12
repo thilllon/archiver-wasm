@@ -163,12 +163,6 @@ impl WasmZipStream {
         self.inner.inner.take_output()
     }
 
-    // deps/compress-commons/lib/archivers/archive-output-stream.js:88-90
-    #[wasm_bindgen(js_name = getBytesWritten)]
-    pub fn get_bytes_written(&self) -> f64 {
-        self.inner.inner.get_bytes_written() as f64
-    }
-
     // deps/compress-commons/lib/archivers/zip/zip-archive-output-stream.js:359-366
     #[wasm_bindgen(js_name = isZip64)]
     pub fn is_zip64(&self) -> bool {
@@ -665,7 +659,7 @@ mod tests {
         expected.extend_from_slice(&[0u8; 18]);
         assert_eq!(zip.take_output(), expected);
         assert_eq!(zip.take_output(), Vec::<u8>::new());
-        assert_eq!(zip.get_bytes_written(), 22.0);
+        assert_eq!(zip.inner.inner.offset, 22);
         assert_eq!(zip.central_offset(), 0.0);
         assert_eq!(zip.central_length(), 0.0);
         assert!(!zip.is_zip64());
@@ -722,7 +716,7 @@ mod tests {
         assert_eq!(info.offset_file(), 0.0);
         assert_eq!(info.offset_data(), 14.0);
         assert_eq!(info.offset_contents(), 35.0);
-        assert_eq!(zip.get_bytes_written(), 54.0);
+        assert_eq!(zip.inner.inner.offset, 54);
     }
 
     const SOURCE: &[u8] = b"this is a text file";
@@ -794,11 +788,11 @@ mod tests {
         assert_eq!(info.offset_file(), 0.0);
         assert_eq!(info.offset_data(), 14.0);
         assert_eq!(info.offset_contents(), 35.0);
-        assert_eq!(zip.get_bytes_written(), 70.0);
+        assert_eq!(zip.inner.inner.offset, 70);
         zip.finish();
         assert_eq!(zip.central_offset(), 70.0);
         assert_eq!(zip.central_length(), 51.0);
-        assert_eq!(zip.get_bytes_written(), 143.0);
+        assert_eq!(zip.inner.inner.offset, 143);
     }
 
     #[test]
@@ -825,11 +819,11 @@ mod tests {
         assert_eq!(info.offset_file(), 6.0);
         assert_eq!(info.offset_data(), 20.0);
         assert_eq!(info.offset_contents(), 41.0);
-        assert_eq!(zip.get_bytes_written(), 76.0);
+        assert_eq!(zip.inner.inner.offset, 76);
         zip.finish();
         assert_eq!(zip.central_offset(), 76.0);
         assert_eq!(zip.central_length(), 51.0);
-        assert_eq!(zip.get_bytes_written(), 156.0);
+        assert_eq!(zip.inner.inner.offset, 156);
         let output = zip.take_output();
         assert_eq!(output.len(), 150);
         assert_eq!(&output[output.len() - 9..], b"\x07\0archive");
@@ -843,7 +837,7 @@ mod tests {
         assert_eq!(entry(&mut zip, true, true, b"123", &[7u8; 12], true), 1);
         assert!(zip.write_data(SOURCE).is_ok());
         assert_eq!(zip.take_output(), SOURCE);
-        assert_eq!(zip.get_bytes_written(), 0.0);
+        assert_eq!(zip.inner.inner.offset, 0);
         assert!(zip.end_data().is_ok());
         assert_eq!(zip.take_output().len(), 35);
         assert!(zip.encrypt_data(SOURCE).is_ok());
@@ -860,7 +854,7 @@ mod tests {
         assert_eq!(info.gpb(), 1);
         assert_eq!(info.extra(), Vec::<u8>::new());
         assert_eq!(info.offset_contents(), 35.0);
-        assert_eq!(zip.get_bytes_written(), 66.0);
+        assert_eq!(zip.inner.inner.offset, 66);
 
         let Ok(mut zip) = WasmZipStream::new(false, 2) else {
             panic!("encryption 2 is valid");
@@ -878,7 +872,7 @@ mod tests {
             vec![0x01, 0x99, 0x07, 0x00, 0x01, 0x00, 0x41, 0x45, 0x03, 0x00, 0x00]
         );
         assert_eq!(info.offset_contents(), 46.0);
-        assert_eq!(zip.get_bytes_written(), 93.0);
+        assert_eq!(zip.inner.inner.offset, 93);
     }
 
     #[test]

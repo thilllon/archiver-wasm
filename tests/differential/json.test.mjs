@@ -36,7 +36,7 @@ function streamOf(chunks) {
 }
 
 // PORTING.md 14.2 (determinism: modes are set by chmod, times by lutimes)
-export function makeTree() {
+function makeTree() {
   const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'ykk-diff-json-')));
   const write = (rel, data, mode) => {
     const target = path.join(root, rel);
@@ -60,12 +60,12 @@ export function makeTree() {
 }
 
 // PORTING.md 14.2
-export function removeTree(root) {
+function removeTree(root) {
   fs.rmSync(root, { recursive: true, force: true });
 }
 
 // PORTING.md 14.2 (case J1: buffer, string and stream sources; key order; unsigned crc32; caller keys)
-export async function j1(impl, ctx) {
+async function j1(impl, ctx) {
   const archive = ctx.create('json');
   archive.append(Buffer.from('test'), { name: 'buffer.txt', date: DATE });
   archive.append('string', { name: 'string.txt', date: DATE, mode: 0o600 });
@@ -99,21 +99,21 @@ export async function j1(impl, ctx) {
 }
 
 // PORTING.md 14.2 (case J2: one file() with stats)
-export async function j2File(impl, ctx) {
+async function j2File(impl, ctx) {
   const archive = ctx.create('json');
   archive.file(path.join(ctx.args.root, ctx.args.rel), { name: ctx.args.name, caller: true });
   await archive.finalize();
 }
 
 // PORTING.md 14.2 (case J2: one directory() with stats)
-export async function j2Directory(impl, ctx) {
+async function j2Directory(impl, ctx) {
   const archive = ctx.create('json');
   archive.directory(ctx.args.root, 'tree', { caller: true });
   await archive.finalize();
 }
 
 // PORTING.md 14.2 (case J3: several fs sources, class N)
-export async function j3(impl, ctx) {
+async function j3(impl, ctx) {
   const root = ctx.args.root;
   const archive = ctx.create('json');
   archive.file(path.join(root, 'a.txt'), { name: 'a.txt' });

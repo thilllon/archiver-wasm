@@ -42,11 +42,6 @@ pub fn dos_to_date(dos: u32) -> DateFields {
     }
 }
 
-// deps/compress-commons/lib/archivers/zip/util.js:36-38
-pub fn from_dos_time(buf: &[u8]) -> Option<DateFields> {
-    Some(dos_to_date(get_long_bytes_value(buf, 0)?))
-}
-
 // deps/compress-commons/lib/archivers/zip/util.js:39-44
 pub fn get_eight_bytes(v: u64) -> [u8; 8] {
     let mut buf = [0u8; 8];
@@ -62,23 +57,11 @@ pub fn get_short_bytes(v: u64) -> [u8; 2] {
     buf
 }
 
-// deps/compress-commons/lib/archivers/zip/util.js:50-52
-pub fn get_short_bytes_value(buf: &[u8], offset: usize) -> Option<u16> {
-    let b = buf.get(offset..offset.checked_add(2)?)?;
-    Some(u16::from_le_bytes([b[0], b[1]]))
-}
-
 // deps/compress-commons/lib/archivers/zip/util.js:53-57
 pub fn get_long_bytes(v: u64) -> [u8; 4] {
     let mut buf = [0u8; 4];
     buf[0..4].copy_from_slice(&(v as u32).to_le_bytes());
     buf
-}
-
-// deps/compress-commons/lib/archivers/zip/util.js:58-60
-pub fn get_long_bytes_value(buf: &[u8], offset: usize) -> Option<u32> {
-    let b = buf.get(offset..offset.checked_add(4)?)?;
-    Some(u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
 }
 
 // toDosTime (deps/compress-commons/lib/archivers/zip/util.js:61-63): not ported, PORTING.md N1.
@@ -162,16 +145,6 @@ mod tests {
     }
 
     #[test]
-    fn from_dos_time_reads_le_or_none() {
-        assert_eq!(
-            from_dos_time(&[0x53, 0x73, 0x23, 0x42, 0xff]),
-            Some(fields(2013.0, 0.0, 3.0, 14.0, 26.0, 38.0))
-        );
-        assert_eq!(from_dos_time(&[0x53, 0x73, 0x23]), None);
-        assert_eq!(from_dos_time(&[]), None);
-    }
-
-    #[test]
     fn eight_bytes_low_then_high_word() {
         assert_eq!(get_eight_bytes(0), [0; 8]);
         assert_eq!(
@@ -194,17 +167,5 @@ mod tests {
         assert_eq!(get_long_bytes(0x04034b50), [0x50, 0x4b, 0x03, 0x04]);
         assert_eq!(get_long_bytes(0xffff_ffff), [0xff, 0xff, 0xff, 0xff]);
         assert_eq!(get_long_bytes(0x1_0000_0001), [1, 0, 0, 0]);
-    }
-
-    #[test]
-    fn bytes_value_reads_at_offset_or_none() {
-        let buf = [0x00, 0x50, 0x4b, 0x03, 0x04];
-        assert_eq!(get_short_bytes_value(&buf, 1), Some(0x4b50));
-        assert_eq!(get_short_bytes_value(&buf, 3), Some(0x0403));
-        assert_eq!(get_short_bytes_value(&buf, 4), None);
-        assert_eq!(get_short_bytes_value(&buf, usize::MAX), None);
-        assert_eq!(get_long_bytes_value(&buf, 1), Some(0x04034b50));
-        assert_eq!(get_long_bytes_value(&buf, 2), None);
-        assert_eq!(get_long_bytes_value(&buf, usize::MAX), None);
     }
 }

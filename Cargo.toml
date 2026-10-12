@@ -9,7 +9,6 @@ new_without_default = "allow"      # the pinned argument-less `new()` of CRC32St
 needless_range_loop = "allow"      # upstream's counting loops that index are ported as counting loops (deps/tar-stream/headers.js:237-238); RS-40
 
 [profile.release]
-opt-level = 3
 lto = true
 codegen-units = 1
 panic = "abort"

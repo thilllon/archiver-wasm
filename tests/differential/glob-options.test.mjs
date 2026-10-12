@@ -32,7 +32,7 @@ let root;
 // PORTING.md 14.2 (determinism: modes are set by chmod, times by lutimes). Three links and no cycle:
 // link-file -> a.txt, link-dir -> sub/deep (a directory that holds no link), broken -> missing.txt.
 // No two names differ by case only, so the tree is the same on a case-insensitive file system.
-export function makeTree() {
+function makeTree() {
   const tree = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'ykk-diff-glob-')));
   const write = (rel, data, mode) => {
     const target = path.join(tree, rel);
@@ -67,7 +67,7 @@ export function makeTree() {
 }
 
 // PORTING.md 14.2
-export function removeTree(tree) {
+function removeTree(tree) {
   fs.rmSync(tree, { recursive: true, force: true });
 }
 

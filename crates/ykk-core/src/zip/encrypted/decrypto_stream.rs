@@ -5,7 +5,6 @@ const HEADER_LENGTH: usize = 12;
 
 // archiver-zip-encrypted/lib/zip20/decrypto-stream.js:12
 pub struct DecryptoStream {
-    pub key: Vec<u8>,
     pub cipher: CryptoCipher,
     pub header: Vec<u8>,
     pub header_processed: bool,
@@ -16,7 +15,6 @@ impl DecryptoStream {
     // archiver-zip-encrypted/lib/zip20/decrypto-stream.js:12-25
     pub fn new(key: &[u8]) -> Self {
         DecryptoStream {
-            key: key.to_vec(),
             cipher: CryptoCipher::new(key),
 
             header: Vec::new(),
@@ -132,7 +130,6 @@ mod tests {
         assert!(!stream.header_processed);
         assert_eq!(stream.header, &encrypted[..12]);
         assert_eq!(stream.get_total_size(), 0);
-        assert_eq!(stream.key, b"123");
 
         stream._transform(&encrypted[12..], &mut out);
         assert_eq!(out, b"hello");

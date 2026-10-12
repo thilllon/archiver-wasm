@@ -2,12 +2,12 @@
 // Zip record parser for the differential tests (PORTING.md 14.2, layouts of 17.1). Pure JavaScript.
 //
 //   parseZip(buffer) -> {
-//     end,           EOCD: offset, bytes, diskNumber, centralDisk, entriesOnDisk, entries,
+//     end,           EOCD: offset, bytes, entriesOnDisk, entries,
 //                    centralSize, centralOffset, commentLength, comment
-//     zip64End,      zip64 EOCD or null: offset, bytes, recordSize, versionMadeBy, versionNeeded,
-//                    diskNumber, centralDisk, entriesOnDisk, entries, centralSize, centralOffset
-//     zip64Locator,  zip64 locator or null: offset, bytes, zip64EndDisk, zip64EndOffset, totalDisks
-//     centralOffset, centralSize, entryCount     the values in effect (zip64 where the 32-bit field is all ones)
+//     zip64End,      zip64 EOCD or null: offset, bytes, versionMadeBy, versionNeeded,
+//                    entriesOnDisk, entries, centralSize, centralOffset
+//     zip64Locator,  zip64 locator or null: offset, bytes, zip64EndOffset
+//     centralOffset, centralSize     the values in effect (zip64 where the 32-bit field is all ones)
 //     prefix,        the bytes before the first local header
 //     central,       central headers in directory order
 //     entries,       [{ name, central, local, payload, descriptor }] in directory order
@@ -21,16 +21,16 @@
 // The payload of an entry is delimited by the records around it, never by a compressed size
 // field, so that a declared size can be compared with the bytes really written (P17).
 
-export const SIG_LFH = 0x04034b50;
-export const SIG_DD = 0x08074b50;
-export const SIG_CFH = 0x02014b50;
-export const SIG_EOCD = 0x06054b50;
-export const SIG_ZIP64_EOCD = 0x06064b50;
-export const SIG_ZIP64_EOCD_LOC = 0x07064b50;
-export const ZIP64_MAGIC_SHORT = 0xffff;
-export const ZIP64_MAGIC = 0xffffffff;
-export const ZIP64_EXTRA_ID = 0x0001;
-export const AES_EXTRA_ID = 0x9901;
+const SIG_LFH = 0x04034b50;
+const SIG_DD = 0x08074b50;
+const SIG_CFH = 0x02014b50;
+const SIG_EOCD = 0x06054b50;
+const SIG_ZIP64_EOCD = 0x06064b50;
+const SIG_ZIP64_EOCD_LOC = 0x07064b50;
+const ZIP64_MAGIC_SHORT = 0xffff;
+const ZIP64_MAGIC = 0xffffffff;
+const ZIP64_EXTRA_ID = 0x0001;
+const AES_EXTRA_ID = 0x9901;
 
 const LFH_LENGTH = 30;
 const CFH_LENGTH = 46;
@@ -58,7 +58,7 @@ function expectSignature(buffer, offset, signature, what) {
   }
 }
 
-export function parseExtra(extra) {
+function parseExtra(extra) {
   const fields = [];
   let offset = 0;
   while (offset + 4 <= extra.length) {
@@ -86,13 +86,11 @@ function parseZip64Extra(field) {
 function parseAesExtra(field) {
   const data = field.data;
   if (data.length < 7) {
-    return { dataOffset: field.dataOffset, version: null, vendor: null, strength: null, method: null };
+    return { dataOffset: field.dataOffset, version: null, method: null };
   }
   return {
     dataOffset: field.dataOffset,
     version: data.readUInt16LE(0),
-    vendor: data.toString('latin1', 2, 4),
-    strength: data.readUInt8(4),
     method: data.readUInt16LE(5),
   };
 }
@@ -102,7 +100,6 @@ function describeExtra(extra) {
   const zip64Field = extraFields.find((field) => field.id === ZIP64_EXTRA_ID);
   const aesField = extraFields.find((field) => field.id === AES_EXTRA_ID);
   return {
-    extraFields,
     zip64: zip64Field ? parseZip64Extra(zip64Field) : null,
     aes: aesField ? parseAesExtra(aesField) : null,
   };
@@ -120,8 +117,6 @@ function parseEnd(buffer) {
     return {
       offset,
       bytes: buffer.subarray(offset),
-      diskNumber: buffer.readUInt16LE(offset + 4),
-      centralDisk: buffer.readUInt16LE(offset + 6),
       entriesOnDisk: buffer.readUInt16LE(offset + 8),
       entries: buffer.readUInt16LE(offset + 10),
       centralSize: buffer.readUInt32LE(offset + 12),
@@ -141,9 +136,7 @@ function parseZip64Locator(buffer, end) {
   return {
     offset,
     bytes: buffer.subarray(offset, offset + ZIP64_EOCD_LOC_LENGTH),
-    zip64EndDisk: buffer.readUInt32LE(offset + 4),
     zip64EndOffset: readUInt64LE(buffer, offset + 8),
-    totalDisks: buffer.readUInt32LE(offset + 16),
   };
 }
 
@@ -154,11 +147,8 @@ function parseZip64End(buffer, locator) {
   return {
     offset,
     bytes: buffer.subarray(offset, offset + ZIP64_EOCD_LENGTH),
-    recordSize: readUInt64LE(buffer, offset + 4),
     versionMadeBy: buffer.readUInt16LE(offset + 12),
     versionNeeded: buffer.readUInt16LE(offset + 14),
-    diskNumber: buffer.readUInt32LE(offset + 16),
-    centralDisk: buffer.readUInt32LE(offset + 20),
     entriesOnDisk: readUInt64LE(buffer, offset + 24),
     entries: readUInt64LE(buffer, offset + 32),
     centralSize: readUInt64LE(buffer, offset + 40),
@@ -190,14 +180,10 @@ function parseCentralHeader(buffer, offset) {
     crc: buffer.readUInt32LE(offset + 16),
     compressedSize: buffer.readUInt32LE(offset + 20),
     size: buffer.readUInt32LE(offset + 24),
-    nameLength,
     extraLength,
     commentLength,
-    diskStart: buffer.readUInt16LE(offset + 34),
-    internalAttributes: buffer.readUInt16LE(offset + 36),
     externalAttributes: buffer.readUInt32LE(offset + 38),
     localHeaderOffset: buffer.readUInt32LE(offset + 42),
-    nameBytes,
     name: nameBytes.toString('utf8'),
     extraOffset,
     extra,
@@ -239,9 +225,7 @@ function parseLocalHeader(buffer, offset) {
     crc: buffer.readUInt32LE(offset + 14),
     compressedSize: buffer.readUInt32LE(offset + 18),
     size: buffer.readUInt32LE(offset + 22),
-    nameLength,
     extraLength,
-    nameBytes,
     name: nameBytes.toString('utf8'),
     extra,
     ...describeExtra(extra),
@@ -311,7 +295,6 @@ export function parseZip(input) {
       name: header.name,
       central: header,
       local,
-      payloadOffset: dataStart,
       payload: buffer.subarray(dataStart, dataEnd),
       descriptor,
     };
@@ -322,7 +305,6 @@ export function parseZip(input) {
     end,
     zip64End,
     zip64Locator,
-    entryCount,
     centralSize,
     centralOffset,
     centralEnd,

@@ -1,4 +1,4 @@
-export type QueueWorker<T> = (task: T, callback: (err?: Error | null) => void) => void;
+type QueueWorker<T> = (task: T, callback: (err?: Error | null) => void) => void;
 export interface QueueObject<T> {
   concurrency: number;
   push(data: T): void;
@@ -62,52 +62,12 @@ class DLL<T> {
         this.length += 1;
     }
 
-    insertBefore(node: DLLNode<T>, newNode: DLLNode<T>) {
-        newNode.prev = node.prev;
-        newNode.next = node;
-        if (node.prev) node.prev.next = newNode;else this.head = newNode;
-        node.prev = newNode;
-        this.length += 1;
-    }
-
-    unshift(node: DLLNode<T>) {
-        if (this.head) this.insertBefore(this.head, node);else setInitial(this, node);
-    }
-
     push(node: DLLNode<T>) {
         if (this.tail) this.insertAfter(this.tail, node);else setInitial(this, node);
     }
 
     shift() {
         return this.head && this.removeLink(this.head);
-    }
-
-    pop() {
-        return this.tail && this.removeLink(this.tail);
-    }
-
-    toArray() {
-        return [...this];
-    }
-
-    *[Symbol.iterator]() {
-        var cur = this.head;
-        while (cur) {
-            yield cur.data;
-            cur = cur.next;
-        }
-    }
-
-    remove(testFn: (node: DLLNode<T>) => unknown) {
-        var curr = this.head;
-        while (curr) {
-            var { next } = curr;
-            if (testFn(curr)) {
-                this.removeLink(curr);
-            }
-            curr = next;
-        }
-        return this;
     }
 }
 
@@ -148,7 +108,7 @@ function _queue<T>(worker: (items: T[], callback: (err?: Error | null) => void) 
 
     // node-archiver/node_modules/async/internal/queue.js:106
     function _createCB() {
-        return function (err?: Error | null) {
+        return function () {
             numRunning -= 1;
 
             if (q.idle()) {

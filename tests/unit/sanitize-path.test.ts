@@ -7,7 +7,7 @@ import normalizePath from '../../src/normalize-path.ts';
 import { sanitizePath as coreSanitizePath } from '../../src/utils.ts';
 import { sanitizePath as zipStreamSanitizePath } from '../../src/zip-stream/utils.ts';
 
-// [input, normalizePath(input, false), sanitizePath(input)]
+// [input, normalizePath(input), sanitizePath(input)]
 type Vector = [string, string, string];
 
 const vectors: Vector[] = JSON.parse(
@@ -22,9 +22,9 @@ describe('sanitize-path vectors', function () {
     }
   });
 
-  it('src/normalize-path.ts normalizePath(input, false)', function () {
+  it('src/normalize-path.ts normalizePath(input)', function () {
     for (const [input, normalized] of vectors) {
-      assert.strictEqual(normalizePath(input, false), normalized, JSON.stringify(input));
+      assert.strictEqual(normalizePath(input), normalized, JSON.stringify(input));
     }
   });
 

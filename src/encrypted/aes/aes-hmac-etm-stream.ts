@@ -9,8 +9,6 @@ import type { WasmAesHmacEtmStream } from '../../wasm-types.js';
 
 const SALT_LENGTH = 16;
 const KEY_LENGTH = 32;
-const COMPOSITE_KEY_LENGTH = 2 * KEY_LENGTH + 2;
-const PBKDF2_ITERATION_COUNT = 1000;
 
 // archiver-zip-encrypted/lib/aes/aes-hmac-etm-stream.js:55 (the argument conversion of crypto.pbkdf2Sync, PORTING.md 7.9)
 export function toBytes(value: unknown, name: string): Buffer {

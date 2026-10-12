@@ -4,8 +4,7 @@
 //
 //   decryptZip20(payload, password) -> Promise<{ header, data }>
 //       header: the 12 decrypted header bytes (fewer when the payload is shorter, P17)
-//   decryptAes(payload, password)   -> { salt, verifier, expectedVerifier, verifierOk,
-//                                        ciphertext, data, mac, expectedMac, macOk }
+//   decryptAes(payload, password)   -> { salt, verifierOk, data, mac, expectedMac, macOk }
 //   entryMethod(entry)              -> the real compression method of a parsed zip entry (0 or 8)
 //   entryData(entry, password)      -> Promise<Buffer>: the decrypted and inflated payload of an
 //                                      entry parsed by zip-records.mjs
@@ -97,10 +96,7 @@ export function decryptAes(payload, password) {
 
   return {
     salt,
-    verifier,
-    expectedVerifier: compositeKey.passwordVerifier,
     verifierOk: compositeKey.passwordVerifier.equals(verifier),
-    ciphertext,
     data,
     mac,
     expectedMac,

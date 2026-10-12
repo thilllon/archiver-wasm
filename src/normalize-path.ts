@@ -6,7 +6,7 @@
  */
 
 // node-archiver/node_modules/normalize-path/index.js:8
-export default function normalizePath(path: string, stripTrailing?: boolean): string {
+export default function normalizePath(path: string): string {
   if (typeof path !== 'string') {
     throw new TypeError('expected path to be a string');
   }
@@ -29,8 +29,5 @@ export default function normalizePath(path: string, stripTrailing?: boolean): st
   }
 
   var segs = path.split(/[/\\]+/);
-  if (stripTrailing !== false && segs[segs.length - 1] === '') {
-    segs.pop();
-  }
   return prefix + segs.join('/');
 }

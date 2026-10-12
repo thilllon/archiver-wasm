@@ -15,7 +15,7 @@ const ZLIB_BEST_SPEED = 1;
 const MAX_TEXT = 64 * 1024 * 1024;
 
 /** The options object after `_defaults` (zip-archive-output-stream.js:28-41). */
-export type ZipArchiveOutputStreamOptions = ArchiverOptions & {
+type ZipArchiveOutputStreamOptions = ArchiverOptions & {
   zlib: ZlibOptions;
   forceZip64: boolean;
   forceLocalTime: boolean;

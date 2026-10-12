@@ -60,7 +60,7 @@ export function normalizeInputSource(source: unknown): unknown {
 
 // node-archiver/lib/utils.js:58
 export function sanitizePath(filepath: string): string {
-  return normalizePath(filepath, false)
+  return normalizePath(filepath)
     .replace(/^\w+:/, "")
     .replace(/^(\.\.\/|\/)+/, "");
 }

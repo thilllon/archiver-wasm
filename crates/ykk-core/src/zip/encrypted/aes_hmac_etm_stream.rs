@@ -8,7 +8,6 @@ use sha1::Sha1;
 
 use crate::error::ZipError;
 
-pub const SALT_LENGTH: usize = 16;
 pub const KEY_LENGTH: usize = 32;
 pub const COMPOSITE_KEY_LENGTH: usize = 2 * KEY_LENGTH + 2;
 pub const PBKDF2_ITERATION_COUNT: u32 = 1000;
@@ -181,7 +180,6 @@ mod tests {
 
     #[test]
     fn constants() {
-        assert_eq!(SALT_LENGTH, 16);
         assert_eq!(KEY_LENGTH, 32);
         assert_eq!(COMPOSITE_KEY_LENGTH, 66);
         assert_eq!(PBKDF2_ITERATION_COUNT, 1000);

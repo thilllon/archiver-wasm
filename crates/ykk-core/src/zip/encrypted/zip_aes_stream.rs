@@ -496,7 +496,7 @@ mod tests {
         archive.extend_from_slice(&append(&mut zip, "a.txt", true, true, &[b"hello"]).1);
         archive.extend_from_slice(&append(&mut zip, "b.txt", true, false, &[b"hel", b"lo"]).1);
         archive.extend_from_slice(&append(&mut zip, "d/", true, true, &[]).1);
-        zip.finalize();
+        zip.inner.finish();
         archive.extend_from_slice(&zip.inner.take_output());
         assert_eq!(
             hex(&archive),

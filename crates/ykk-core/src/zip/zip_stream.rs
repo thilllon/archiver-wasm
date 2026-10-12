@@ -56,11 +56,6 @@ impl ZipStream {
         }
         self.inner.entry(entry, source, opts, &data.date)
     }
-
-    // deps/zip-stream/index.js:158-160
-    pub fn finalize(&mut self) {
-        self.inner.finish();
-    }
 }
 
 #[cfg(test)]
@@ -120,12 +115,11 @@ mod tests {
         assert_eq!(entry.get_time_dos(), 1109619539);
         assert_eq!(entry.get_method(), METHOD_STORED);
         assert_eq!(entry.get_comment(), "ü");
-        assert!(entry.get_general_purpose_bit().uses_utf8_for_names());
+        assert!(entry.get_general_purpose_bit().utf8);
         // :144 runs last and reads isDirectory() of the final name.
         assert_eq!(entry.get_platform(), PLATFORM_UNIX);
         assert_eq!(entry.get_external_attributes(), 1106051088);
         assert_eq!(entry.mode, Some(493));
-        assert_eq!(entry.get_unix_mode(), 16877);
         assert_eq!(entry.get_size(), 5);
         assert_eq!(entry.get_compressed_size(), 5);
         assert_eq!(entry.get_crc(), 0x3610a686);
@@ -150,7 +144,7 @@ mod tests {
         assert_eq!(entry.get_time_dos(), 1109619539);
         assert_eq!(entry.get_method(), METHOD_DEFLATED);
         assert_eq!(entry.get_comment(), "");
-        assert!(!entry.get_general_purpose_bit().uses_utf8_for_names());
+        assert!(!entry.get_general_purpose_bit().utf8);
         assert_eq!(entry.get_platform(), PLATFORM_FAT);
         assert_eq!(entry.get_external_attributes(), 0);
         assert_eq!(entry.mode, None);
@@ -175,30 +169,6 @@ mod tests {
         );
         assert!(zip.inner._entry.is_none());
         assert!(!zip.inner._archive.processing);
-        assert_eq!(zip.inner.get_bytes_written(), 0);
-    }
-
-    #[test]
-    fn finalize_is_finish() {
-        let mut zip = ZipStream::new(false, Encryption::None);
-        zip.finalize();
-        assert!(zip.inner._archive.finish);
-        assert!(zip.inner._archive.finished);
-        // an empty archive is the 22-byte end of central directory record
-        assert_eq!(zip.inner.take_output().len(), 22);
-
-        let mut zip = ZipStream::new(false, Encryption::None);
-        let data = ZipEntryData {
-            name: "a.txt".to_owned(),
-            date: date(),
-            name_prepend_slash: false,
-            store: true,
-            comment: String::new(),
-            mode: None,
-        };
-        zip.entry(Source::Stream, &data, &opts()).unwrap();
-        zip.finalize();
-        assert!(zip.inner._archive.finish);
-        assert!(!zip.inner._archive.finished);
+        assert_eq!(zip.inner.offset, 0);
     }
 }

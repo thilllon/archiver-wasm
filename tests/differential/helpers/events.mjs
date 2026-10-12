@@ -15,11 +15,11 @@ import fs from 'node:fs';
 import { types } from 'node:util';
 
 export const EVENTS = ['entry', 'progress', 'warning', 'error', 'end', 'close'];
-export const COMPARED_EVENTS = ['entry', 'progress', 'warning', 'error'];
+const COMPARED_EVENTS = ['entry', 'progress', 'warning', 'error'];
 
 // PORTING.md 3.2 V15 (a)
-export const V15_ENTRY_KEYS = ['namePrependSlash', 'linkname', 'store', 'comment'];
-export const V15_SYMLINK_ENTRY_KEYS = ['date', 'mode', 'store'];
+const V15_ENTRY_KEYS = ['namePrependSlash', 'linkname', 'store', 'comment'];
+const V15_SYMLINK_ENTRY_KEYS = ['date', 'mode', 'store'];
 
 function isError(value) {
   return types.isNativeError(value) || value instanceof Error;

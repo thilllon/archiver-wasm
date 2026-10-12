@@ -386,7 +386,7 @@ fn replay_zip(scenario: &ZipScenario) -> Vec<u8> {
         }
     }
     zip.inner.set_comment(scenario.archive_comment);
-    zip.finalize();
+    zip.inner.finish();
     result.extend_from_slice(&zip.inner.take_output());
     result
 }

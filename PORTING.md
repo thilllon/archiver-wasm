@@ -94,7 +94,8 @@ M2. **The port looks like the original was transpiled.** Same file boundaries (o
     file per upstream file, section 4), same function order inside a file, same names
     (camelCase kept in TypeScript, snake_case in Rust, leading underscores kept: upstream
     `_writeLocalFileHeader` is Rust `_write_local_file_header`), same statement order, same
-    branch order, same constants with the same names (including unused ones). A reviewer who
+    branch order, same constants with the same names. Upstream code that nothing in the
+    package calls or reads is left out, and V21 lists it. A reviewer who
     knows the upstream file must be able to read the port side by side with it. Every ported
     function carries a one-line comment with its upstream `path:line`. The reference comes
     first and is complete: the path as this guide cites it, relative to `.upstream/`
@@ -408,6 +409,7 @@ number.
 | V18 | The encrypted constructors (`ZipEncrypted`, `ZipAesStream`, `ZipCryptoStream`, `CryptoStream`, `DecryptoStream`, `AesHmacEtmStream`) called as `X.call(this, options)` from a `util.inherits` subclass return a new instance and leave `this` uninitialised; upstream initialises `this` (zip-encrypted.js:31-35). `class extends X`, `X(options)` and `new X(options)` behave as upstream, and `X.name` and `instance.constructor` are upstream's. | R18: an ES class cannot be applied to an existing `this`. |
 | V19 | archiver 7's `Archiver.prototype.use(plugin)` (archiver-zip-encrypted/node_modules/archiver/lib/core.js:913-916) is not ported; calling it throws a `TypeError`. | It is `@private` and "yet to be fully implemented": it pushes into `_streams`, which nothing reads. archiver 8 removed it. |
 | V20 | The package ships one bundle per module format (`dist/index.mjs` for `import`, `dist/index.cjs` for `require`; 15.4). A process that loads both has two sets of classes, so `instanceof` does not hold across the two module formats: an archive made by `require('@thilllon/ykk')('zip')` is not an instance of the imported `Archiver`, and an error created by one bundle is not an instance of the other's `ArchiverError`. Within one format everything is as upstream. Two things are shared: the format registry of `src/vending.ts`, which is kept on `globalThis[Symbol.for('@thilllon/ykk.formats')]` (the bundle that loads first registers `zip`, `tar` and `json`, the other finds the registry and registers nothing, so a format registered through `require` is visible to `import` and the reverse), and the wasm instance (both bundles `require` the same `dist/wasm/ykk_wasm.cjs`). Upstream ships one module format per major, so it has one set of classes per installed copy. | No entry is written by hand: tsdown builds each format from `src/`, and publint and attw check the result (15.4). One set of classes for both formats needed a hand-written CommonJS entry, a hand-written declaration of it and a hand-written ESM entry that re-exported it. |
+| V21 | Upstream code that nothing in the package calls or reads is not ported. Rust: buffer-crc32 `unsigned`; `CRC32Stream.hex` and `DeflateCRC32Stream.hex`; archive-entry.js (the `ArchiveEntry` marker class) and every constant of unix-stat.js; in constants.js `WORD`, `DWORD`, `SHORT`, `LONG`, `SHORT_MASK`, the four `ZLIB_*`, `DEFAULT_FILE_MODE`, `DEFAULT_DIR_MODE`, `EXT_FILE_ATTR_DIR`, `EXT_FILE_ATTR_FILE`, `S_IFMT`, `S_IFIFO`, `S_IFCHR`, `S_IFBLK`, `S_IFLNK`, `S_IFSOCK`, `S_DOS_V`, `S_DOS_S`, `S_DOS_H`, `S_DOS_R`; in zip/util.js `fromDosTime`, `getShortBytesValue`, `getLongBytesValue`; in general-purpose-bit.js `parse`, `setNumberOfShannonFanoTrees`, `getNumberOfShannonFanoTrees`, `setSlidingDictionarySize`, `getSlidingDictionarySize`, `usesEncryption`, `useStrongEncryption`, `usesStrongEncryption`, `usesUTF8ForNames` with their three fields and three flag constants; in zip-archive-entry.js `getLastModifiedDate`, `getUnixMode`, `setGeneralPurposeBit`, `setInternalAttributes`, `setPlatform`, `isUnixSymlink`; `ArchiveOutputStream.getBytesWritten` and `ZipStream.finalize` (both stay in TypeScript, and wasm does not export `getBytesWritten`); the stored `key` of `CryptoStream` and `DecryptoStream`; `SALT_LENGTH` of aes-hmac-etm-stream.js; the tar-stream header constants `GNU_MAGIC` and `GNU_VER`, which only the reader side (N3) reads. TypeScript: the `DoublyLinkedList` members `insertBefore`, `unshift`, `pop`, `toArray`, the iterator and `remove`; the `stripTrailing` parameter of `normalizePath`; the `checkOpen` option of `isStream`; the `options` parameter of `lazystream.Readable`; the callback form of readdir-glob; the default export and the `ArchiveEntry` and `ArchiveOutputStream` re-exports of compress-commons.js and the default export of compress-commons util/index.js; the fallback object of tar-stream constants.js and the statement `if (sink._isVoid) { return sink }` of `Pack.entry`; `COMPOSITE_KEY_LENGTH` and `PBKDF2_ITERATION_COUNT` in `aes-hmac-etm-stream.ts` and `HEADER_LENGTH` in `decrypto-stream.ts`, whose uses are in Rust (6.11). | The package has no dead code. None of these is on a write path or on the published surface (7.2), so no output byte, event or exported name changes. Sections 6.1, 6.4 to 6.8, 6.10, 6.11, 7.3, 7.4 and 7.8 name each item where it would stand. N2, N3 and N5 list what was left out from the start. |
 
 ### 3.3 Upstream defects that are preserved
 
@@ -450,7 +452,8 @@ Do not fix these in the port phase. Each has `BEHAVIORS.tsv` rows.
 
 ### 3.4 Intentional non-ports
 
-Upstream code that is deliberately not ported. Nothing else may be omitted.
+Upstream code that is deliberately not ported. Nothing else may be omitted, except the
+unused code that V21 lists.
 
 | # | Not ported | Reason |
 |---|---|---|
@@ -470,8 +473,9 @@ ENCRYPTED-118; columns `id`, `upstream`, `symbol`, `layer`, `target`, `behavior`
 
 - `target` lists every place that must implement or preserve the behavior, separated by
   ` ; `, each as `path#item`. An item is one that the pinned call path really reaches:
-  where that path goes through `json::append` into `crc32::buf`, the target is `buf`, not
-  the same-valued `unsigned` that nothing on the path calls (TAR-JSON-112). Rust items use
+  where that path goes through `json::append` into `crc32::buf`, the target is `buf`. The
+  same-valued `unsigned` is not ported: nothing in the package calls it (V21,
+  TAR-JSON-112). Rust items use
   `::`, TypeScript items use `.`. An item in
   parentheses (`#(module: every pub const of PORTING.md 6.5)`) names a group that the cited
   section of this guide enumerates. A target without `#` is the whole file. A target that
@@ -600,16 +604,14 @@ crates/ykk-core/Cargo.toml                   (pinned, 12.1)
 crates/ykk-core/src/lib.rs                   module list (pinned, 6.1)
 crates/ykk-core/src/error.rs                 ZipError, DeflateError (pinned, 6.2)
 crates/ykk-core/src/numeric.rs               to_int32, to_uint32, i64_to_string_radix8, utf16_len, truthy_str, write_at (pinned, 6.3)
-crates/ykk-core/src/crc32.rs                 deps/crc-32/crc32.js (buf) + buffer-crc32 (unsigned)
+crates/ykk-core/src/crc32.rs                 deps/crc-32/crc32.js (buf)
 crates/ykk-core/src/crc32_stream.rs          deps/crc32-stream/lib/{crc32-stream,deflate-crc32-stream,index}.js
 crates/ykk-core/src/gzip.rs                  gzip member writer (replaces zlib.createGzip, node-archiver/lib/plugins/tar.js:28)
 crates/ykk-core/src/json.rs                  byte-derived part of node-archiver/lib/plugins/json.js:59-60
 crates/ykk-core/src/zip/mod.rs               deps/compress-commons/lib/compress-commons.js (barrel)
 crates/ykk-core/src/zip/constants.rs         deps/compress-commons/lib/archivers/zip/constants.js
 crates/ykk-core/src/zip/util.rs              deps/compress-commons/lib/archivers/zip/util.js
-crates/ykk-core/src/zip/unix_stat.rs         deps/compress-commons/lib/archivers/zip/unix-stat.js
 crates/ykk-core/src/zip/general_purpose_bit.rs   .../zip/general-purpose-bit.js
-crates/ykk-core/src/zip/archive_entry.rs     deps/compress-commons/lib/archivers/archive-entry.js
 crates/ykk-core/src/zip/zip_archive_entry.rs .../zip/zip-archive-entry.js
 crates/ykk-core/src/zip/utils.rs             normalize-path/index.js + sanitizePath (deps/zip-stream/utils.js:17-21)
 crates/ykk-core/src/zip/archive_output_stream.rs     Rust part of .../archivers/archive-output-stream.js
@@ -657,7 +659,7 @@ src/plugins/tar.ts                           node-archiver/lib/plugins/tar.js
 src/plugins/json.ts                          node-archiver/lib/plugins/json.js
 src/zip-stream/index.ts                      TS part of deps/zip-stream/index.js
 src/zip-stream/utils.ts                      deps/zip-stream/utils.js
-src/compress-commons/index.ts                deps/compress-commons/lib/compress-commons.js
+src/compress-commons/index.ts                deps/compress-commons/lib/compress-commons.js (the two named exports that are imported, V21)
 src/compress-commons/util.ts                 deps/compress-commons/lib/util/index.js
 src/compress-commons/archive-entry.ts        .../archivers/archive-entry.js
 src/compress-commons/archive-output-stream.ts        TS part of .../archivers/archive-output-stream.js
@@ -723,8 +725,8 @@ another unit (the phases after the loop follow 2.1).
 |---|---|---|
 | rs-scaffold | rust-core | `Cargo.toml`, `rust-toolchain.toml`, `crates/ykk-core/Cargo.toml`, `crates/ykk-core/src/{lib,error,numeric}.rs`, `crates/ykk-wasm/Cargo.toml` |
 | rs-crc-deflate | rust-core | `crc32.rs`, `crc32_stream.rs`, `gzip.rs`, `json.rs` |
-| rs-zip-util | rust-core | `zip/{constants,util,unix_stat,general_purpose_bit,utils}.rs` |
-| rs-zip-entry | rust-core | `zip/{mod,archive_entry,zip_archive_entry,zip_stream}.rs` |
+| rs-zip-util | rust-core | `zip/{constants,util,general_purpose_bit,utils}.rs` |
+| rs-zip-entry | rust-core | `zip/{mod,zip_archive_entry,zip_stream}.rs` |
 | rs-zip-writer | rust-core | `zip/{archive_output_stream,zip_archive_output_stream}.rs` |
 | rs-zip20 | rust-core | `zip/encrypted/{mod,crc,crypto_cipher,crypto_stream,decrypto_stream,zip_crypto_stream}.rs` |
 | rs-aes | rust-core | `zip/encrypted/{aes_hmac_etm_stream,zip_aes_stream}.rs` |
@@ -864,8 +866,6 @@ impl WasmZipStream {
     pub fn finish(&mut self);
     #[wasm_bindgen(js_name = takeOutput)]
     pub fn take_output(&mut self) -> Vec<u8>;
-    #[wasm_bindgen(js_name = getBytesWritten)]
-    pub fn get_bytes_written(&self) -> f64;
     #[wasm_bindgen(js_name = isZip64)]
     pub fn is_zip64(&self) -> bool;
     #[wasm_bindgen(js_name = centralOffset)]
@@ -1145,24 +1145,18 @@ pub mod tar;
 pub mod zip;
 
 // crates/ykk-core/src/zip/mod.rs   (port of compress-commons.js barrel; written by unit rs-zip-entry)
-pub mod archive_entry;
 pub mod archive_output_stream;
 pub mod constants;
 pub mod encrypted;
 pub mod general_purpose_bit;
-pub mod unix_stat;
 pub mod util;
 pub mod utils;
 pub mod zip_archive_entry;
 pub mod zip_archive_output_stream;
 pub mod zip_stream;
-pub use archive_entry::ArchiveEntry;
-pub use general_purpose_bit::GeneralPurposeBit;
 pub use util::DateFields;
-pub use zip_archive_entry::{Offsets, ZipArchiveEntry};
-pub use zip_archive_output_stream::{
-    Archive, Encryption, EntryOptions, EntryStatus, Source, ZipArchiveOutputStream,
-};
+pub use zip_archive_entry::ZipArchiveEntry;
+pub use zip_archive_output_stream::{Encryption, EntryOptions, EntryStatus, Source};
 pub use zip_stream::{ZipEntryData, ZipStream};
 
 // crates/ykk-core/src/zip/encrypted/mod.rs   (written by unit rs-zip20)
@@ -1173,7 +1167,7 @@ pub mod crypto_stream;
 pub mod decrypto_stream;
 pub mod zip_aes_stream;
 pub mod zip_crypto_stream;
-pub use aes_hmac_etm_stream::{derive_key, AesHmacEtmStream, CompositeKey};
+pub use aes_hmac_etm_stream::{derive_key, AesHmacEtmStream};
 pub use crypto_cipher::CryptoCipher;
 pub use crypto_stream::CryptoStream;
 pub use decrypto_stream::DecryptoStream;
@@ -1182,8 +1176,15 @@ pub use decrypto_stream::DecryptoStream;
 pub mod headers;
 pub mod pack;
 pub use headers::Header;
-pub use pack::{overflow, Pack, END_OF_TAR};
+pub use pack::{overflow, Pack};
 ```
+
+A `mod.rs` re-exports only what another module of the package imports through it. The
+other public items are reached by their module path: `GeneralPurposeBit`, `Offsets`,
+`Archive`, `ZipArchiveOutputStream`, `CompositeKey` and `END_OF_TAR` stay `pub` in the
+file that defines them. `zip/archive_entry.rs` and `zip/unix_stat.rs` do not exist: the
+upstream files archive-entry.js and unix-stat.js are not ported, because nothing in the
+package uses them (V21).
 
 ### 6.2 `error.rs` (scaffold unit, verbatim)
 
@@ -1214,10 +1215,11 @@ pub enum ZipError {
 }
 impl fmt::Display for DeflateError { /* as above */ }
 impl fmt::Display for ZipError { /* as above */ }
-impl std::error::Error for DeflateError {}
-impl std::error::Error for ZipError {}
 impl From<DeflateError> for ZipError { fn from(e: DeflateError) -> Self { ZipError::Deflate(e.0) } }
 ```
+
+Neither type implements `std::error::Error`: every caller reads the `Display` string
+(`to_js_error`, 5.3) and nothing in the package needs the trait.
 
 `DeflateError.0` is one of two texts, both produced by the deflate loop of 6.4 and by
 nothing else: the `Display` of flate2's `CompressError` when `compress_vec` returns `Err`
@@ -1255,11 +1257,9 @@ pub fn write_at(buf: &mut [u8], s: &str, offset: usize);
 /// crc-32 `buf(B, seed) >>> 0` (deps/crc-32/crc32.js:70-82). `seed` is the previous result,
 /// 0 for the first chunk. Implemented with crc32fast::Hasher::new_with_initial(seed).
 pub fn buf(b: &[u8], seed: u32) -> u32;
-/// buffer-crc32 `crc32.unsigned(buf)` (json.js:60, zip-aes-stream.js:149): equal to
-/// `buf(b, 0)`. Kept as the named whole-buffer form for native callers and tests; the wasm
-/// path feeds slices through `buf` with a seed (5.4), so nothing in ykk-core or ykk-wasm
-/// calls it outside tests. It is `pub`, so that is no dead code.
-pub fn unsigned(buf: &[u8]) -> u32;
+// buffer-crc32 `crc32.unsigned(buf)` (json.js:60, zip-aes-stream.js:149) is not ported:
+// nothing in the package calls it (V21). It equals `buf(b, 0)`, and the wasm path feeds
+// slices through `buf` with a seed (5.4).
 
 // crc32_stream.rs
 /// zlib level as given by JS to a flate2 level: -1 gives 6; values below -1 give 6;
@@ -1279,7 +1279,7 @@ impl CRC32Stream {
     pub fn new() -> Self;                                            // crc32-stream.js:5-10
     pub fn _transform(&mut self, chunk: &[u8], out: &mut Vec<u8>);   // :11-17, appends chunk unchanged
     pub fn digest(&self) -> [u8; 4];                                 // :18-22, BIG-endian
-    pub fn hex(&self) -> String;                                     // :23-25, upper case
+    // hex (:23-25): not ported, nothing in the package calls it (V21)
     pub fn size(&self, compressed: bool) -> u64;                     // :26-28, ignores the argument (written `_compressed`)
 }
 
@@ -1289,7 +1289,7 @@ impl DeflateCRC32Stream {
     pub fn _transform(&mut self, chunk: &[u8], out: &mut Vec<u8>) -> Result<(), DeflateError>; // :18-24
     pub fn _flush(&mut self, out: &mut Vec<u8>) -> Result<(), DeflateError>; // zlib end: FlushCompress::Finish until StreamEnd
     pub fn digest(&self) -> [u8; 4];                                 // :25-29
-    pub fn hex(&self) -> String;                                     // :30-32
+    // hex (:30-32): not ported, nothing in the package calls it (V21)
     pub fn size(&self, compressed: bool) -> u64;                     // :33-39
 }
 // `push` override (:12-17): a private `fn push(&mut self, chunk: &[u8])` that adds chunk.len() to
@@ -1363,25 +1363,25 @@ nothing after it. The outcomes are pinned so that no unit adds a "finished" flag
 | a second `DeflateCRC32Stream::_flush` | `Ok(())`, nothing appended |
 | a second `Gzip::finish` | `Ok(())`; the 8-byte trailer is appended again |
 
-### 6.5 `zip/constants.rs`, `zip/unix_stat.rs` (unit rs-zip-util)
+### 6.5 `zip/constants.rs` (unit rs-zip-util)
 
-Every upstream constant is ported with the same name, including unused ones (ZIP-122/123).
-Types: `WORD, DWORD, SHORT, LONG: usize`; `EMPTY: &[u8] = &[]`; `SHORT_ZERO: [u8; 2]`,
-`LONG_ZERO: [u8; 4]`; `SHORT_MASK: u32 = 0xffff`; `SHORT_SHIFT: u32 = 16`;
+The upstream constants that the package uses are ported with the same name. The others are
+not ported, because nothing in the package uses them (V21, ZIP-122/123): `WORD`, `DWORD`,
+`SHORT`, `LONG`, `SHORT_MASK`, `ZLIB_NO_COMPRESSION`, `ZLIB_BEST_SPEED`,
+`ZLIB_BEST_COMPRESSION`, `ZLIB_DEFAULT_COMPRESSION`, `DEFAULT_FILE_MODE`,
+`DEFAULT_DIR_MODE`, `EXT_FILE_ATTR_DIR`, `EXT_FILE_ATTR_FILE`, `S_IFMT`, `S_IFIFO`,
+`S_IFCHR`, `S_IFBLK`, `S_IFLNK`, `S_IFSOCK`, `S_DOS_V`, `S_DOS_S`, `S_DOS_H`, `S_DOS_R`,
+and every constant of unix-stat.js, so there is no `zip/unix_stat.rs`.
+Types: `EMPTY: &[u8] = &[]`; `SHORT_ZERO: [u8; 2]`,
+`LONG_ZERO: [u8; 4]`; `SHORT_SHIFT: u32 = 16`;
 `MIN_VERSION_INITIAL = 10`, `MIN_VERSION_DATA_DESCRIPTOR = 20`, `MIN_VERSION_ZIP64 = 45`,
 `VERSION_MADEBY = 45`: `u16`; `METHOD_STORED = 0`, `METHOD_DEFLATED = 8`: `i32`;
 `PLATFORM_UNIX = 3`, `PLATFORM_FAT = 0`: `u8`; `SIG_LFH = 0x04034b50`, `SIG_DD = 0x08074b50`,
 `SIG_CFH = 0x02014b50`, `SIG_EOCD = 0x06054b50`, `SIG_ZIP64_EOCD = 0x06064b50`,
 `SIG_ZIP64_EOCD_LOC = 0x07064b50`: `u32`; `ZIP64_MAGIC_SHORT = 0xffff`,
-`ZIP64_MAGIC = 0xffffffff`: `u64`; `ZIP64_EXTRA_ID = 0x0001`: `u16`; `ZLIB_NO_COMPRESSION = 0`,
-`ZLIB_BEST_SPEED = 1`, `ZLIB_BEST_COMPRESSION = 9`, `ZLIB_DEFAULT_COMPRESSION = -1`: `i32`;
-`MODE_MASK = 0xfff`, `DEFAULT_FILE_MODE = 33188`, `DEFAULT_DIR_MODE = 16877`, all `S_IF*`
-(61440, 4096, 8192, 16384, 24576, 32768, 40960, 49152) and `S_DOS_A = 32`, `S_DOS_D = 16`,
-`S_DOS_V = 8`, `S_DOS_S = 4`, `S_DOS_H = 2`, `S_DOS_R = 1`: `i32`;
-`EXT_FILE_ATTR_DIR = 1106051088`, `EXT_FILE_ATTR_FILE = 2175008800`: `u32`.
-`unix_stat.rs`: `PERM_MASK = 4095`, `FILE_TYPE_FLAG = 61440`, `LINK_FLAG = 40960`,
-`FILE_FLAG = 32768`, `DIR_FLAG = 16384`, `DEFAULT_LINK_PERM = 511`, `DEFAULT_DIR_PERM = 493`,
-`DEFAULT_FILE_PERM = 420`: `u32`.
+`ZIP64_MAGIC = 0xffffffff`: `u64`; `ZIP64_EXTRA_ID = 0x0001`: `u16`;
+`MODE_MASK = 0xfff`, `S_IFDIR = 16384`, `S_IFREG = 32768`, `S_DOS_A = 32`,
+`S_DOS_D = 16`: `i32`.
 
 ### 6.6 `zip/util.rs`, `zip/utils.rs`, `zip/general_purpose_bit.rs` (unit rs-zip-util)
 
@@ -1394,12 +1394,12 @@ pub struct DateFields { pub year: f64, pub month: f64, pub date: f64, pub hours:
 
 pub fn date_to_dos(d: &DateFields) -> u32;                 // util.js:1-25 (forceLocalTime already applied by the caller)
 pub fn dos_to_date(dos: u32) -> DateFields;                // :26-35, fields for a LOCAL-time Date constructor; not range-checked (below)
-pub fn from_dos_time(buf: &[u8]) -> Option<DateFields>;    // :36-38, None if buf is shorter than 4 bytes
+// fromDosTime (:36-38): not ported, nothing in the package calls it (V21).
 pub fn get_eight_bytes(v: u64) -> [u8; 8];                 // :39-44
 pub fn get_short_bytes(v: u64) -> [u8; 2];                 // :45-49  (v as u16, wrapping)
-pub fn get_short_bytes_value(buf: &[u8], offset: usize) -> Option<u16>;  // :50-52, None if out of range
+// getShortBytesValue (:50-52): not ported, nothing in the package calls it (V21).
 pub fn get_long_bytes(v: u64) -> [u8; 4];                  // :53-57  (v as u32, wrapping)
-pub fn get_long_bytes_value(buf: &[u8], offset: usize) -> Option<u32>;   // :58-60, None if out of range
+// getLongBytesValue (:58-60): not ported, nothing in the package calls it (V21).
 // toDosTime (:61-63): not ported, N1.
 
 // utils.rs
@@ -1410,26 +1410,25 @@ pub fn sanitize_path(filepath: &str) -> String;                      // zip-stre
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GeneralPurposeBit {
     pub descriptor: bool, pub encryption: bool, pub utf8: bool,
-    pub number_of_shannon_fano_trees: u32, pub strong_encryption: bool, pub sliding_dictionary_size: u32,
 }
 impl GeneralPurposeBit {
     pub fn new() -> Self;
     pub fn encode(&self) -> [u8; 2];
-    pub fn parse(buf: &[u8], offset: usize) -> Option<GeneralPurposeBit>;  // None if out of range
-    pub fn set_number_of_shannon_fano_trees(&mut self, n: u32);
-    pub fn get_number_of_shannon_fano_trees(&self) -> u32;
-    pub fn set_sliding_dictionary_size(&mut self, n: u32);
-    pub fn get_sliding_dictionary_size(&self) -> u32;
     pub fn use_data_descriptor(&mut self, b: bool);
     pub fn uses_data_descriptor(&self) -> bool;
     pub fn use_encryption(&mut self, b: bool);
-    pub fn uses_encryption(&self) -> bool;
-    pub fn use_strong_encryption(&mut self, b: bool);
-    pub fn uses_strong_encryption(&self) -> bool;
     pub fn use_utf8_for_names(&mut self, b: bool);
-    pub fn uses_utf8_for_names(&self) -> bool;
 }
 ```
+
+Not ported from general-purpose-bit.js, because nothing in the package calls them (V21):
+`parse`, `setNumberOfShannonFanoTrees`, `getNumberOfShannonFanoTrees`,
+`setSlidingDictionarySize`, `getSlidingDictionarySize`, `usesEncryption`,
+`useStrongEncryption`, `usesStrongEncryption`, `usesUTF8ForNames`, with the three fields
+and the three flag constants only they touch (`numberOfShannonFanoTrees`,
+`strongEncryption`, `slidingDictionarySize`). `encode` therefore has no strong-encryption
+operand; upstream's operand is always 0 on a write path. Code that needs the encryption or
+the UTF-8 flag reads the `pub` field.
 
 `date_to_dos` is a literal port (section 10.5). `dos_to_date` is one too and validates
 nothing: it returns the six numbers upstream hands to the `Date` constructor, and they can
@@ -1441,9 +1440,7 @@ path calls it.
 `get_short_bytes`, `get_long_bytes` and `get_eight_bytes` take `u64` whatever the integer
 type at the call site is; the call site widens with `as u64` and the function truncates,
 which is upstream's mask (10.1 has the types per quantity, RS-10 and RS-38 the call
-sites). `get_short_bytes_value`, `get_long_bytes_value` and `GeneralPurposeBit::parse`
-return `None` when `offset` plus the width lies past the end of `buf` or overflows `usize`
-(`buf.get(offset..offset.checked_add(2)?)?`); upstream throws a `RangeError` there (V13).
+sites).
 
 `normalize_path` operates on a Rust `&str`; the JS code indexes UTF-16 units, but every
 index it inspects (`path[2]`, `path[3]`, `path.slice(0, 2)`) is only meaningful when the
@@ -1458,16 +1455,11 @@ dropped (`'a/b/'` gives `'a/b'`, `'//'` gives `''`). Every upstream call site pa
 (zip-stream/utils.js:18, zip-archive-entry.js:288), and so do `sanitize_path` and
 `set_name`; the `true` branch is ported and tested all the same (14.3).
 
-### 6.7 `zip/archive_entry.rs`, `zip/zip_archive_entry.rs` (unit rs-zip-entry)
+### 6.7 `zip/zip_archive_entry.rs` (unit rs-zip-entry)
 
 ```rust
-// archive_entry.rs  (archive-entry.js: the instanceof marker becomes a trait)
-pub trait ArchiveEntry {
-    fn get_name(&self) -> Option<&str>;
-    fn get_size(&self) -> u64;
-    fn get_last_modified_date(&self) -> Option<DateFields>;
-    fn is_directory(&self) -> bool;
-}
+// archive-entry.js (the instanceof marker class) is not ported to Rust: nothing in the
+// package uses it there (V21). The TypeScript class of 7.5 keeps it.
 
 // zip_archive_entry.rs
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -1502,7 +1494,6 @@ impl ZipArchiveEntry {
     pub fn get_general_purpose_bit(&self) -> &GeneralPurposeBit;
     pub fn get_general_purpose_bit_mut(&mut self) -> &mut GeneralPurposeBit;
     pub fn get_internal_attributes(&self) -> u16;
-    pub fn get_last_modified_date(&self) -> Option<DateFields>;
     pub fn get_local_file_data_extra(&self) -> &[u8];
     pub fn get_method(&self) -> i32;                     // -1 when None
     pub fn get_name(&self) -> Option<&str>;
@@ -1510,28 +1501,27 @@ impl ZipArchiveEntry {
     pub fn get_size(&self) -> u64;
     pub fn get_time(&self) -> Option<DateFields>;        // None stands for upstream -1
     pub fn get_time_dos(&self) -> u32;                   // 0 when None
-    pub fn get_unix_mode(&self) -> u32;
     pub fn get_version_needed_to_extract(&self) -> u16;
     pub fn set_comment(&mut self, comment: &str);
     pub fn set_compressed_size(&mut self, size: u64);    // V7: no error
     pub fn set_crc(&mut self, crc: u32);                 // V7
     pub fn set_external_attributes(&mut self, attr: u32);
     pub fn set_extra(&mut self, extra: Vec<u8>);
-    pub fn set_general_purpose_bit(&mut self, gpb: GeneralPurposeBit);  // V7
-    pub fn set_internal_attributes(&mut self, attr: u16);
     pub fn set_method(&mut self, method: u16);           // V7
     pub fn set_name(&mut self, name: &str, prepend_slash: bool);
-    pub fn set_platform(&mut self, platform: u8);
     pub fn set_size(&mut self, size: u64);               // V7
     pub fn set_time(&mut self, time: &DateFields);       // dateToDos(time, forceLocalTime); getter family chosen by the caller
     pub fn set_unix_mode(&mut self, mode: i32);
     pub fn set_version_needed_to_extract(&mut self, minver: u16);
     pub fn is_directory(&self) -> bool;                  // name ends with '/'; false when name is None (upstream TypeError, unreachable: ZipStream::entry rejects empty names first)
-    pub fn is_unix_symlink(&self) -> bool;
     pub fn is_zip64(&self) -> bool;
 }
-impl ArchiveEntry for ZipArchiveEntry { /* delegates */ }
 ```
+
+Not ported from zip-archive-entry.js, because nothing in the package calls them (V21):
+`getLastModifiedDate`, `getUnixMode`, `setGeneralPurposeBit`, `setInternalAttributes`,
+`setPlatform`, `isUnixSymlink`. `set_unix_mode` assigns `self.platform = PLATFORM_UNIX`
+where upstream calls `setPlatform` (10.3), and `inattr` keeps its initial 0.
 
 UTF-8 flag predicate (`Buffer.byteLength(s) !== s.length`, zip-archive-entry.js:208, 294) is
 `!s.is_ascii()`. `set_unix_mode` is pinned in section 10.3.
@@ -1541,7 +1531,8 @@ UTF-8 flag predicate (`Buffer.byteLength(s) !== s.length`, zip-archive-entry.js:
 One struct holds the state of the whole upstream class chain `ArchiveOutputStream` (base),
 `ZipArchiveOutputStream`, and the encrypted subclasses. `archive_output_stream.rs` contains
 only an `impl ZipArchiveOutputStream` block with the base-class methods (`entry`, `finish`,
-`get_bytes_written`, `write`) and `set_offset`.
+`write`) and `set_offset`. `getBytesWritten` (archive-output-stream.js:88-90) is not ported
+to Rust: nothing in the package calls it there (V21), and the `offset` field is `pub`.
 
 ```rust
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1607,7 +1598,6 @@ impl ZipArchiveOutputStream {
     pub fn entry(&mut self, ae: ZipArchiveEntry, source: Source, opts: &EntryOptions, now: &DateFields)
         -> Result<EntryStatus, ZipError>;
     pub fn finish(&mut self);                                            // :80-86
-    pub fn get_bytes_written(&self) -> u64;                              // :88-90
     pub fn write(&mut self, chunk: &[u8]);                               // :92-97
     /// Overwrites `self.offset`. Upstream has one offset, advanced by every write() into
     /// the Transform, including bytes a caller writes directly (:92-97). The stream layer
@@ -1800,9 +1790,11 @@ impl ZipStream {
     ///   if let Some(mode) = data.mode { entry.set_unix_mode(mode) } // :140-145
     ///   self.inner.entry(entry, source, opts, &data.date)           // :149 (`now` is never read: time is set)
     pub fn entry(&mut self, source: Source, data: &ZipEntryData, opts: &EntryOptions) -> Result<EntryStatus, ZipError>;
-    pub fn finalize(&mut self);     // :158-160
 }
 ```
+
+`finalize` (index.js:158-160) is not ported to Rust: nothing in the package calls it there
+(V21). It is `this.finish()`, and callers use `inner.finish()`.
 
 ### 6.11 `zip/encrypted/*` primitives (units rs-zip20, rs-aes)
 
@@ -1826,7 +1818,7 @@ impl CryptoCipher {
 
 // crypto_stream.rs  (lib/zip20/crypto-stream.js)
 pub const HEADER_LENGTH: usize = 12;
-pub struct CryptoStream { pub key: Vec<u8>, pub crc: u16, pub cipher: CryptoCipher, pub header_sent: bool, pub header: [u8; 12] }
+pub struct CryptoStream { pub crc: u16, pub cipher: CryptoCipher, pub header_sent: bool, pub header: [u8; 12] }   // upstream's `this.key` is read by nothing after the constructor and is not kept (V21)
 impl CryptoStream {
     /// crc = upstream `this.crc.readUInt16BE(0)` (the two most significant CRC bytes).
     /// header = the bytes upstream draws with crypto.randomBytes(12); injected.
@@ -1836,7 +1828,7 @@ impl CryptoStream {
 }
 
 // decrypto_stream.rs  (lib/zip20/decrypto-stream.js)
-pub struct DecryptoStream { pub key: Vec<u8>, pub cipher: CryptoCipher, pub header: Vec<u8>, pub header_processed: bool, pub total_size: u64 }
+pub struct DecryptoStream { pub cipher: CryptoCipher, pub header: Vec<u8>, pub header_processed: bool, pub total_size: u64 }   // `this.key` is not kept either (V21)
 impl DecryptoStream {
     pub fn new(key: &[u8]) -> Self;                                    // :12-25 (crc is stored and never used upstream; not taken)
     pub fn get_total_size(&self) -> u64;                               // :29-31
@@ -1845,7 +1837,7 @@ impl DecryptoStream {
 }
 
 // aes_hmac_etm_stream.rs  (lib/aes/aes-hmac-etm-stream.js)
-pub const SALT_LENGTH: usize = 16;
+// SALT_LENGTH (:8): not ported, nothing in the package uses it (V21); the salt is an argument
 pub const KEY_LENGTH: usize = 32;
 pub const COMPOSITE_KEY_LENGTH: usize = 2 * KEY_LENGTH + 2;
 pub const PBKDF2_ITERATION_COUNT: u32 = 1000;
@@ -2240,7 +2232,7 @@ and setImmediate.js):
 function onlyOnce<A extends unknown[]>(fn: ((...args: A) => void) | null) { ... }    // async/internal/onlyOnce.js:7-13, literal
 const _setImmediate = queueMicrotask;                                                // async/internal/setImmediate.js:24-25
 type DLLNode<T> = { data: T; prev?: DLLNode<T> | null; next?: DLLNode<T> | null };
-class DLL<T> { head; tail; length; removeLink; empty; insertAfter; insertBefore; unshift; push; shift; pop; toArray; [Symbol.iterator]; remove }   // async/internal/DoublyLinkedList.js:10-85, literal
+class DLL<T> { head; tail; length; removeLink; empty; insertAfter; push; shift }   // the used members of async/internal/DoublyLinkedList.js:10-85, each literal
 function setInitial<T>(dll: DLL<T>, node: DLLNode<T>) { ... }                        // async/internal/DoublyLinkedList.js:88-91
 function _queue<T>(worker: (items: T[], callback: (err?: Error | null) => void) => void,
                    concurrency: number | null | undefined, payload: number): QueueObject<T> { ... }   // async/internal/queue.js:26-293
@@ -2250,9 +2242,11 @@ export function queue<T>(worker: QueueWorker<T>, concurrency?: number | null): Q
 }
 ```
 
-`DLL` is the whole upstream class, member by member; it links the task items through their
-own `prev` and `next` properties, so `shift()` is O(1) (an `Array` here makes draining a
-long queue quadratic).
+`DLL` has the members of the upstream class that the queue uses, each a literal copy; it
+links the task items through their own `prev` and `next` properties, so `shift()` is O(1)
+(an `Array` here makes draining a long queue quadratic). `insertBefore`, `unshift`, `pop`,
+`toArray`, the iterator and `remove` are not ported: nothing in the package calls them
+(V21). `QueueWorker` is declared in the file and not exported.
 
 `_setImmediate` is `queueMicrotask` itself, captured when the module is evaluated as
 upstream captures its defer; the closure `(fn, ...args) => defer(() => fn(...args))` that
@@ -2286,7 +2280,8 @@ Exact semantics of `_queue` (node-archiver/node_modules/async/internal/queue.js)
   `new Error('Callback was already called.')`; the first runs the function `_createCB()`
   returned, which does `numRunning -= 1`, then `if (q.idle())` calls every drain handler
   synchronously (`drainHandlers.forEach(handler => handler())`), then `q.process()`.
-  `_createCB` takes no `tasks` argument and its `err` parameter is not read: the loop of
+  `_createCB` takes no `tasks` argument and the function it returns has no `err`
+  parameter, because nothing would read it: the loop of
   lines 110-125 (the per-task callback, which only settles the promise `push` returned,
   the `'error'` event and `workersList`) and the `'unsaturated'` trigger are not ported.
 - `idle()`: `_tasks.length + numRunning === 0` (queue.js:255-257).
@@ -2323,20 +2318,40 @@ export function normalizeInputSource(source: unknown): unknown;
 export function sanitizePath(filepath: string): string;
 export function trailingSlashIt(str: string): string;
 
-// src/normalize-path.ts  (normalize-path 3.0.0, literal; default export)
-export default function normalizePath(path: string, stripTrailing?: boolean): string;
+// src/normalize-path.ts  (normalize-path 3.0.0 without the stripTrailing parameter; default export)
+export default function normalizePath(path: string): string;
 
-// src/is-stream.ts  (is-stream 4.0.1 isStream, literal)
-export function isStream(stream: unknown, options?: { checkOpen?: boolean }): stream is NodeJS.ReadableStream | NodeJS.WritableStream;
+// src/is-stream.ts  (is-stream 4.0.1 isStream without the options parameter)
+export function isStream(stream: unknown): stream is NodeJS.ReadableStream | NodeJS.WritableStream;
 
 // src/lazystream.ts  (lazystream 1.0.1 Readable on node:stream PassThrough; the whole file is pinned below)
-export class Readable extends PassThrough { constructor(fn: (options?: TransformOptions) => NodeJS.ReadableStream, options?: TransformOptions) }
+export class Readable extends PassThrough { constructor(fn: () => NodeJS.ReadableStream) }
 
-// src/readdir-glob.ts  (deps/readdir-glob/src/index.ts, copied statement by statement)
-export class ReaddirGlob extends EventEmitter { ... }      // same members, same visibility
-export const readdirGlob: { (pattern?: string, options?: Options | Callback, cb?: Callback): ReaddirGlob; ReaddirGlob: typeof ReaddirGlob };
+// src/readdir-glob.ts  (deps/readdir-glob/src/index.ts, copied statement by statement, without the callback form)
+export type Options = { ... };
+class ReaddirGlob extends EventEmitter { ... }      // same members, same visibility; constructor(cwd?: string, options?: Options)
+const readdirGlob: { (pattern?: string, options?: Options): ReaddirGlob; ReaddirGlob: typeof ReaddirGlob };
 export default readdirGlob;
 ```
+
+Parameters and forms of these helpers that no caller in the package uses are not ported
+(V21):
+
+- `normalizePath` has no `stripTrailing` parameter and no branch that pops the trailing
+  empty segment (normalize-path/index.js:31-33). Every upstream call site passes `false`
+  (utils.js:59, zip-stream/utils.js:18), so the result is always the one of `false`: every
+  run of `/` or `\` becomes one `/` and a trailing run survives. The Rust copy keeps both
+  values of the flag (6.6).
+- `isStream` has no `options` parameter and no `!checkOpen ||` operand. Every caller uses
+  the default `checkOpen = true`, with which the operand is `false`.
+- `lazystream.Readable` has no `options` parameter (below).
+- readdir-glob has no callback form: the type `Callback`, the `cb` parameter of the
+  constructor and of the `readdirGlob` function, the `typeof options === 'function'`
+  branch and the block that collects matches for the callback (index.ts:201, 222-225, 263-269)
+  are not ported. archiver constructs the globber with `(dirpath, options)` and listens to
+  its events (core.js:632, 694). The option `absolute` stays in `Options`. The module
+  exports `Options` and the default export only; `Stat`, `Match`, `ReaddirGlob` and
+  `readdirGlob` are declared in the file and not exported by name.
 
 `lazystream.Readable` keeps the "replace `_read` on the instance, delete it on first call"
 mechanism of lazystream.js:15-36 (an own property `_read` that deletes itself, calls `fn`,
@@ -2357,11 +2372,11 @@ function beforeFirstCall(instance: Readable, method: '_read', callback: (this: R
 
 // node-archiver/node_modules/lazystream/lib/lazystream.js:23
 export class Readable extends PassThrough {
-  constructor(fn: (options?: TransformOptions) => NodeJS.ReadableStream, options?: TransformOptions) {
-    super({ ...options, autoDestroy: false, emitClose: false });   // PORTING.md V9
+  constructor(fn: () => NodeJS.ReadableStream) {
+    super({ autoDestroy: false, emitClose: false });   // PORTING.md V9
 
     beforeFirstCall(this, '_read', function() {
-      var source = fn.call(this, options);
+      var source = fn.call(this);
       var emit = this.emit.bind(this, 'error');
       source.on('error', emit);
       source.pipe(this);
@@ -2372,15 +2387,17 @@ export class Readable extends PassThrough {
 }
 ```
 
-Three things differ from lazystream.js:23-37, and nothing else may:
+Four things differ from lazystream.js:23-37, and nothing else may:
 
 - `beforeFirstCall` keeps its `method` parameter and the computed accesses
   `instance[method]`, `delete instance[method]` and `this[method]`; the parameter is typed
   as the literal `'_read'`, and the two assertions are the ones of TS-41.
-- The base constructor gets `{ ...options, autoDestroy: false, emitClose: false }`, the
-  lifecycle of the readable-stream 2.3.8 `PassThrough` that upstream extends (V9, 11.12).
-  The two keys come after the spread, because v2 ignores them whatever the caller passes.
-  `fn` is still called with the caller's own `options`.
+- The `options` parameter is not ported, because no caller in the package passes it
+  (V21): archiver constructs the lazy stream with the factory alone (core.js:457-459).
+  The base constructor is not given upstream's `options` and `fn` is called with no
+  argument.
+- The base constructor gets `{ autoDestroy: false, emitClose: false }`, the lifecycle of
+  the readable-stream 2.3.8 `PassThrough` that upstream extends (V9, 11.12).
 - The guard `if (!(this instanceof Readable)) return new Readable(fn, options);`
   (lazystream.js:24-25) is not ported (N5): an ES class cannot be called without `new`.
 
@@ -2636,7 +2653,7 @@ fixed upstream order (6.10). After the entry completes, the same object carries 
 
 ```ts
 // src/compress-commons/zip-archive-entry.ts
-export function dateFields(d: Date, forceLocalTime?: boolean): DateFields;   // getter selection of zip/util.js:2-16
+function dateFields(d: Date, forceLocalTime?: boolean): DateFields;   // getter selection of zip/util.js:2-16; not exported
 
 export default class ZipArchiveEntry extends ArchiveEntry {
   // recorded by ZipStream.entry
@@ -2669,7 +2686,7 @@ export default class ZipArchiveEntry extends ArchiveEntry {
 }
 ```
 
-`ZipEntryInfo` is declared in the same file: `{ name: string; size: number; csize: number;
+`ZipEntryInfo` is declared in the same file and not exported: `{ name: string; size: number; csize: number;
 crc: number; method: number; time: number; minver: number; platform: number; exattr: number;
 inattr: number; gpb: number; extra: Buffer; comment: string; offsetFile: number;
 offsetData: number; offsetContents: number }`. `_setInfo` reads each getter of the wasm
@@ -2822,9 +2839,16 @@ function overflow (self, size) {                    // :280-283
 `'Size mismatch'` check with `!==` (line 102), `'No body allowed for this entry'`, the
 link-name collection, and the header mutation `this.header.linkname = ...` (line 92).
 `Pack.entry` (137-170) is unchanged, including the defaults written into the caller's
-header object. `modeToType`, `noop`, `mapWritable`, `DMODE`, `FMODE` are unchanged.
-`src/tar-stream/constants.ts` is constants.js (`fs.constants || constants`).
-`src/tar-stream/index.ts` exports `pack` (and nothing for `extract`, N3).
+header object, except for the statement `if (sink._isVoid) { return sink }` (165-167),
+which is not ported: the next statement is `return sink` in both cases.
+`modeToType`, `noop`, `mapWritable`, `DMODE`, `FMODE` are unchanged. The constant
+`END_OF_TAR` (pack.js:10) is not declared in TypeScript: both of its uses are the wasm
+calls above, and the bytes are `END_OF_TAR` of `tar/pack.rs` (6.12).
+`src/tar-stream/constants.ts` is one line, `export { constants as default } from 'node:fs'`.
+The literal fallback object of constants.js:1-8 and the `|| constants` branch are not
+ported (V21): `node:fs` always has `constants` on the supported Node versions.
+`src/tar-stream/index.ts` exports `pack` and the type `Pack` (and nothing for `extract`,
+N3). `Sink` and `Header` are not exported from `pack.ts`.
 
 `src/plugins/tar.ts` is lib/plugins/tar.js statement by statement, with
 `zlib.createGzip(options.gzipOptions)` replaced by `createGzip(options.gzipOptions)` from
@@ -3210,9 +3234,10 @@ let deflate = match extra.get(9..11) {
 };
 ```
 
-**RS-32 Dead exports and unused constants.** Constants are ported with their names. Broken
-or reader-only functions are either ported (small, section 6.6) or listed in 3.4. Nothing is
-silently dropped and nothing is "fixed".
+**RS-32 Dead exports and unused constants.** A constant that the package uses is ported
+with its name. Constants, functions, methods and fields that nothing in the package calls
+or reads are not ported, and each one is listed in 3.4 or in V21 (3.2). Nothing is silently
+dropped and nothing is "fixed".
 
 **RS-33 Comparisons against `ZIP64_MAGIC`.** `u64`, strict `>` exactly where upstream has `>`
 (`0xFFFFFFFF` itself is not zip64, ZIP-092/093).
@@ -3272,10 +3297,11 @@ return getShortBytes(                                            // general-purp
 get_short_bytes(
     ((if self.descriptor { DATA_DESCRIPTOR_FLAG } else { 0 })
         | (if self.utf8 { UFT8_NAMES_FLAG } else { 0 })
-        | (if self.encryption { ENCRYPTION_FLAG } else { 0 })
-        | (if self.strong_encryption { STRONG_ENCRYPTION_FLAG } else { 0 })) as u64,
+        | (if self.encryption { ENCRYPTION_FLAG } else { 0 })) as u64,
 )
 ```
+The fourth operand has no arm: `strongEncryption` is not ported, because nothing in the
+package sets it (V21, 6.6), and upstream's operand is then always 0.
 `cargo fmt` spreads an arm that exceeds its single-line width over five lines. That layout
 is accepted (12.3). Do not shorten the arms with locals, with `u16::from(b) * FLAG` or with
 a helper: the chain stays one expression. The file-private flag constants keep their
@@ -3298,8 +3324,9 @@ spellings that clippy would write differently. The expression stays as upstream 
   (general-purpose-bit.js:4) needs nothing: `clippy::identity_op` exempts exactly that
   spelling, while `2 << 0` and `x | 0` would be reported.
 - `dead_code` and `unused` are never allowed (section 16 item 2). An upstream constant that
-  nothing reads is `pub` (6.5); a parameter that the body does not read gets a leading
-  underscore (section 6 rules); a private function that nothing calls is a porting error.
+  nothing reads is not ported (6.5, V21); a parameter that the body does not read gets a
+  leading underscore (section 6 rules); a private function that nothing calls is a porting
+  error.
 
 ---
 
@@ -3837,7 +3864,8 @@ runtime, so the obvious Rust spelling gives different text.
   verified for `len` 1..3,000,000 (TAR-JSON-094).
 - `str.length` used as a byte count (10.9).
 - `Buffer.from(Array(2))` (constants.js) is two zero bytes: holes coerce to 0.
-- `digest('hex').toUpperCase()` (crc32-stream.js:23-25): upper-case hex.
+- `digest('hex').toUpperCase()` (crc32-stream.js:23-25): upper-case hex. `hex` is not
+  ported, because nothing in the package calls it (V21).
 - String concatenation with arbitrary values (`data.type + ' entries not currently
   supported'`, zip-stream/index.js:111, yields `'undefined entries ...'`;
   `' ' + key + '=' + pax[key] + '\n'`) is JS string conversion and stays in TypeScript.
@@ -4443,7 +4471,7 @@ only; a `#[cfg(test)]` module carries its own rows and does not include them.
 | `numeric.rs` | `write_at_bounds` | a string longer than the rest of the buffer is cut at the end, on a character boundary, without panic |
 | `crc32.rs` | `buf_16384_pattern` | the 16384-byte `i & 255` buffer gives 3893830384 |
 | `crc32.rs` | `buf_text_file` | `'this is a text file'` gives 585446183; `'test'` gives 3632233996 |
-| `crc32.rs` | `buf_seed_chaining` | `buf(b, buf(a, 0)) == buf(a + b, 0)` for a split at every position of a 300-byte input; `unsigned(x) == buf(x, 0)` |
+| `crc32.rs` | `buf_seed_chaining` | `buf(b, buf(a, 0)) == buf(a + b, 0)` for a split at every position of a 300-byte input |
 | `json.rs` | `append_slices` | `append` over two slices equals `append` over the whole buffer; sizes add up |
 | `crc32_stream.rs` | `deflate_counts_and_roundtrip` | `compressed_size` equals the bytes appended to `out` including the final flush; inflating them returns the input; an empty input still gives a non-empty stream |
 | `crc32_stream.rs` | `zlib_level_mapping` | -1 gives 6, -5 gives 6, 10 gives 9 |
@@ -4551,7 +4579,7 @@ pub const TAR_SCENARIOS: &[TarScenario] = &[/* ... */];
   `end_data()`. For a `Payload::Stream`: `Source::Stream`, one `write_data` per chunk,
   `end_data()`. For ZipCrypto `end_data()` is the sequence of `SmartStream._flush` (7.5):
   `take_output()` (the buffered chunks), `end_data()`, `encrypt_data` of a non-empty
-  buffer, `encrypt_end()`. Then `set_comment`, `finalize`. A tar scenario is replayed through `Pack`:
+  buffer, `encrypt_end()`. Then `inner.set_comment`, `inner.finish()`. A tar scenario is replayed through `Pack`:
   `_encode(header, pax)`, `push(body)`, `overflow(pack, header.size)` per entry, then
   `finalize()`. `Compare::Bytes` asserts equality with `expected`; `Compare::Structure`
   walks both archives record by record and applies the deflated-zip rule of 14.2.
@@ -4639,11 +4667,12 @@ new_without_default = "allow"      # the pinned argument-less `new()` of CRC32St
 needless_range_loop = "allow"      # upstream's counting loops that index are ported as counting loops (deps/tar-stream/headers.js:237-238); RS-40
 
 [profile.release]
-opt-level = 3
 lto = true
 codegen-units = 1
 panic = "abort"
 ```
+
+The release profile does not set `opt-level`: 3 is cargo's default for that profile.
 
 Both crate manifests add `[lints] workspace = true`. The `allow` entries are the complete
 list of clippy lints that the port silences, and each names the upstream spelling that
@@ -4711,7 +4740,7 @@ export interface WasmZipEntryInfo {
   readonly offsetContents: number;
   free(): void;
 }
-export interface WasmZipStream {
+interface WasmZipStream {
   setComment(comment: string): void;
   setOffset(offset: number): void;
   entry(
@@ -4729,14 +4758,13 @@ export interface WasmZipStream {
   encryptEnd(): void;
   finish(): void;
   takeOutput(): Uint8Array;
-  getBytesWritten(): number;
   isZip64(): boolean;
   centralOffset(): number;
   centralLength(): number;
   lastEntry(): WasmZipEntryInfo | undefined;
   free(): void;
 }
-export interface WasmPack {
+interface WasmPack {
   paxRecord(body: string): void;
   encode(
     name: string, typeflagIs5: boolean, mode: number,
@@ -4749,7 +4777,7 @@ export interface WasmPack {
   takeOutput(): Uint8Array;
   free(): void;
 }
-export interface WasmGzip { write(chunk: Uint8Array): Uint8Array; finish(): Uint8Array; free(): void }
+interface WasmGzip { write(chunk: Uint8Array): Uint8Array; finish(): Uint8Array; free(): void }
 export interface WasmCryptoCipher { encrypt(data: Uint8Array): Uint8Array; decrypt(data: Uint8Array): Uint8Array; free(): void }
 export interface WasmCryptoStream { transform(data: Uint8Array): Uint8Array; free(): void }
 export interface WasmDecryptoStream { transform(data: Uint8Array): Uint8Array; getTotalSize(): number; free(): void }
@@ -5158,7 +5186,8 @@ the Node of the matrix for the tests. Steps: checkout, install `7z`
 (`p7zip-full` with apt, `p7zip` with brew; TESTS-092), set up Node 24, install the Rust
 toolchain named by `rust-toolchain.toml` with the wasm32 target, `rustfmt` and `clippy`
 (`rustup toolchain install` with the channel read from that file), restore the cache of
-cargo downloads and of the `wasm-bindgen` CLI that `wasm-pack` fetches, install `wasm-pack`
+cargo downloads (`~/.cargo/registry`; no dependency is a git dependency, so
+`~/.cargo/git` is not cached) and of the `wasm-bindgen` CLI that `wasm-pack` fetches, install `wasm-pack`
 at the pinned version from its release archive, verified against a recorded SHA-256
 (12.3), `npm ci`, `cargo fmt --check`, `cargo clippy --workspace -- -D warnings`,
 `npm run build`, `npm run typecheck`, set up the Node of the matrix, `npm test`,
@@ -5172,7 +5201,8 @@ cannot request the OIDC identity. `publish` is the only job with `id-token: writ
 out nothing, downloads the archive, requires npm 11.5.1 or later (Node 24) and runs
 `npm publish <archive> --ignore-scripts --access public`. npm exchanges the OIDC identity of
 the workflow for publish access (trusted publisher) and attaches provenance. No npm token
-is stored in the repository. `verify`: `npm view @thilllon/ykk@<version> version` must print
+is stored in the repository. `verify`: it checks out the repository and sets up Node, and runs no `npm ci`, because the script
+it runs imports only Node built-ins. `npm view @thilllon/ykk@<version> version` must print
 the version, and a fresh `npm install @thilllon/ykk@<version>` in an empty project must
 pass the smoke checks of section 16 item 4
 (`node scripts/check-tarball.mjs --spec @thilllon/ykk@<version>`).

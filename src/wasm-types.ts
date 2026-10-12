@@ -18,7 +18,7 @@ export interface WasmZipEntryInfo {
   readonly offsetContents: number;
   free(): void;
 }
-export interface WasmZipStream {
+interface WasmZipStream {
   setComment(comment: string): void;
   setOffset(offset: number): void;
   entry(
@@ -36,14 +36,13 @@ export interface WasmZipStream {
   encryptEnd(): void;
   finish(): void;
   takeOutput(): Uint8Array;
-  getBytesWritten(): number;
   isZip64(): boolean;
   centralOffset(): number;
   centralLength(): number;
   lastEntry(): WasmZipEntryInfo | undefined;
   free(): void;
 }
-export interface WasmPack {
+interface WasmPack {
   paxRecord(body: string): void;
   encode(
     name: string, typeflagIs5: boolean, mode: number,
@@ -56,7 +55,7 @@ export interface WasmPack {
   takeOutput(): Uint8Array;
   free(): void;
 }
-export interface WasmGzip { write(chunk: Uint8Array): Uint8Array; finish(): Uint8Array; free(): void }
+interface WasmGzip { write(chunk: Uint8Array): Uint8Array; finish(): Uint8Array; free(): void }
 export interface WasmCryptoCipher { encrypt(data: Uint8Array): Uint8Array; decrypt(data: Uint8Array): Uint8Array; free(): void }
 export interface WasmCryptoStream { transform(data: Uint8Array): Uint8Array; free(): void }
 export interface WasmDecryptoStream { transform(data: Uint8Array): Uint8Array; getTotalSize(): number; free(): void }
