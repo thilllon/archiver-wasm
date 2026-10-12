@@ -18,6 +18,8 @@ const SALT_HEX = '000102030405060708090a0b0c0d0e0f';
 const ZIP20_HEADER = Buffer.from('a0a1a2a3a4a5a6a7a8a9aaab', 'hex');
 // the uncaught exceptions of D14 follow the 'error' events within this
 const SETTLE_MS = 300;
+// D14: the bound of the wait for the two uncaught exceptions on a loaded machine
+const UNCAUGHT_WAIT_MS = 10000;
 // D15: long enough for a stream that is not stalled to read the whole file and close it
 const LEAK_WAIT_MS = 400;
 const CLOSE_WAIT_MS = 15000;
@@ -164,10 +166,34 @@ export async function sizeMismatch(impl, ctx) {
   const stats = fs.lstatSync(ctx.args.file);
   fs.writeFileSync(ctx.args.file, Buffer.alloc(ctx.args.realSize, 66));
   const archive = ctx.create(ctx.args.format);
+  // The end of the file destroys the pack, and with it the gzip stream (streamx index.js:529), while the
+  // tar header is still inside the compressor: zlib.Gzip answers that write from the thread pool, so
+  // upstream drops the 10 bytes of the gzip header whenever fs.open and fs.read are answered first
+  // (issue #20). The file is opened only after the first chunk has left the archive, which leaves one
+  // order: the header, then the error.
+  const headerWritten = new Promise((resolve) => {
+    archive.once('data', resolve);
+  });
+  const open = fs.open;
+  fs.open = function (target, ...rest) {
+    if (target !== ctx.args.file) {
+      return open.call(this, target, ...rest);
+    }
+    const callback = rest.pop();
+    return open.call(this, target, ...rest, (...answer) => {
+      headerWritten.then(() => callback(...answer));
+    });
+  };
   archive.file(ctx.args.file, { name: 'changed.bin', date: DATE, stats });
   archive.append('after', { name: 'after.txt', date: DATE });
   ctx.watch('finalize', archive.finalize());
+  // a starved child does not reach the error within SETTLE_MS: wait for both exceptions, then for a third
+  const deadline = Date.now() + UNCAUGHT_WAIT_MS;
+  while (uncaught.length < 2 && Date.now() < deadline) {
+    await delay(10);
+  }
   await delay(SETTLE_MS);
+  fs.open = open;
   return { uncaught };
 }
 
@@ -501,10 +527,6 @@ describe('differential: preserved defects (PORTING.md 14.2, D9 to D17)', functio
   });
 
   describe("D14: a file whose size differs from its lstat size in the tar-with-stats path (P29)", function () {
-    // Compares the order of events that race an fs call against a compressor in each
-    // implementation. On a loaded runner the race occasionally resolves the other way
-    // (issue #20), so a failed case is run again before it counts.
-    this.retries(2);
     this.timeout(TEST_TIMEOUT_MS);
     const SIZE_MISMATCH = { name: 'Error', code: undefined, message: 'Size mismatch', data: undefined };
     const cases = [
@@ -546,6 +568,8 @@ describe('differential: preserved defects (PORTING.md 14.2, D9 to D17)', functio
             assert.ok(port.result.bytes.equals(upstream.result.bytes), 'the bytes written before the error differ');
             assert.equal(upstream.result.bytes.length, 512 + realSize);
           } else {
+            // the gzip header: the scenario holds the file back until it has been written
+            assert.equal(upstream.result.bytes.length, 10);
             assert.equal(port.result.bytes.length, upstream.result.bytes.length);
             assert.deepStrictEqual(splitGzipHeader(port.result.bytes), splitGzipHeader(upstream.result.bytes));
           }

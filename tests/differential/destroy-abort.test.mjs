@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import { once } from 'node:events';
 import fs from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 import { Readable } from 'node:stream';
@@ -74,6 +75,25 @@ function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+// PORTING.md 14.2 (helper of the test: resolves at the `count`th 'entry' of the archive, at once without a
+// count. finalize() rejects at the abort, but an engine that still completes entries afterwards (json) goes on
+// through lstat and file reads of no fixed duration, so the scenario waits for the last of them by event and
+// not by SETTLE_MS: a snapshot taken by the clock cuts the two implementations at different entries)
+function entriesReached(archive, count) {
+  if (count === undefined) {
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => {
+    let seen = 0;
+    archive.on('entry', () => {
+      seen += 1;
+      if (seen === count) {
+        resolve();
+      }
+    });
+  });
+}
+
 // node-archiver/lib/core.js:177-180 (the 'error' of the destroyed engine is emitted, then the next queued task
 // runs: Zip.append -> ZipStream.entry on the destroyed engine, PORTING.md V17)
 export async function signalAbortedAtSecondEntry(impl, ctx) {
@@ -86,10 +106,12 @@ export async function signalAbortedAtSecondEntry(impl, ctx) {
       controller.abort();
     }
   });
+  const collected = entriesReached(archive, ctx.args.entries);
   for (let i = 0; i < ctx.args.files.length; i++) {
     archive.file(ctx.args.files[i], { name: `file-${i}.bin`, date: DATE });
   }
   await ctx.watch('finalize', archive.finalize());
+  await collected;
   return { destroyed: archive.destroyed, entries };
 }
 
@@ -98,6 +120,7 @@ export async function signalAbortedAtSecondEntry(impl, ctx) {
 export async function signalAbortedInsideAStream(impl, ctx) {
   const controller = new AbortController();
   const archive = createKind(ctx, ctx.args.kind, { signal: controller.signal });
+  const collected = entriesReached(archive, ctx.args.entries);
   const pushed = [0, 0, 0];
   for (let i = 0; i < pushed.length; i++) {
     const source = new Readable({
@@ -114,6 +137,7 @@ export async function signalAbortedInsideAStream(impl, ctx) {
     archive.append(source, { name: `stream-${i}.bin`, date: DATE });
   }
   await ctx.watch('finalize', archive.finalize());
+  await collected;
   return { destroyed: archive.destroyed };
 }
 
@@ -184,13 +208,46 @@ export async function hugeText(impl, ctx) {
   return { outcome, length, sha256: hash.digest('hex') };
 }
 
+// node-archiver/lib/core.js:392 and src/core.ts:357: the stat queue asks the thread pool, so the turn of the
+// event loop its answer arrives in belongs to the scheduler (issue #20). Here the answer is the real one, taken
+// synchronously, and `deliver` chooses its turn. node-archiver/lib/core.js:1 binds lstat by name.
+function answerLstat(deliver) {
+  const lstat = fs.lstat;
+  fs.lstat = function (file, callback) {
+    let err = null;
+    let stats;
+    try {
+      stats = fs.lstatSync(file);
+    } catch (caught) {
+      err = caught;
+    }
+    deliver(() => callback(err, stats));
+  };
+  syncBuiltinESMExports();
+  return () => {
+    fs.lstat = lstat;
+    syncBuiltinESMExports();
+  };
+}
+
 // node-archiver/lib/core.js:398-408 (the ENOENT 'warning' of the stat queue) against core.js:194-208 (the
-// 'entry' and 'progress' of an entry that needed no file): PORTING.md V3
+// 'entry' and 'progress' of an entry that needed no file): PORTING.md V3. `lstat` is when the stat answers:
+// 'first-turn' in the check phase of the turn its worker started in, which no thread pool answer precedes,
+// 'after-entry' one turn after the 'progress' of the buffer entry.
 async function missingFileThenBuffer(impl, ctx) {
   const archive = ctx.create('zip', ctx.args.options);
-  archive.file(ctx.args.missing, { name: 'missing.txt' });
-  archive.append('x', { name: 'x.txt', date: DATE });
-  await archive.finalize();
+  const restore = answerLstat(
+    ctx.args.lstat === 'after-entry'
+      ? (answer) => archive.once('progress', () => setImmediate(answer))
+      : (answer) => setImmediate(answer)
+  );
+  try {
+    archive.file(ctx.args.missing, { name: 'missing.txt' });
+    archive.append('x', { name: 'x.txt', date: DATE });
+    await archive.finalize();
+  } finally {
+    restore();
+  }
 }
 
 // node-archiver/lib/core.js:70-77, 174-180 (abort() between an entry's completion and its deferred queue
@@ -320,10 +377,6 @@ describe('differential: destroyed engines, comments and names out of contract, V
   }
 
   describe('R1: an AbortSignal aborted in the middle of an archive (V17)', function () {
-    // Compares the order of events that race an fs call against a compressor in each
-    // implementation. On a loaded runner the race occasionally resolves the other way
-    // (issue #20), so a failed case is run again before it counts.
-    this.retries(2);
     this.timeout(TEST_TIMEOUT_MS);
 
     for (const kind of ZIP_KINDS) {
@@ -362,12 +415,21 @@ describe('differential: destroyed engines, comments and names out of contract, V
     }
 
     it('json: the queued entries are still collected after the abort', async function () {
-      for (const name of ['signalAbortedAtSecondEntry', 'signalAbortedInsideAStream']) {
-        const runs = await inChild(name, { kind: 'json', files });
+      // every queued entry is collected in both: the scenario returns at the last 'entry' (a child in which
+      // one is never collected exits unsettled with code 8 once its event loop is empty, or is killed at
+      // CHILD_TIMEOUT_MS if a handle stays open: assertNoCrash fails either way), SETTLE_MS then only
+      // shows that nothing follows it
+      const expected = { signalAbortedAtSecondEntry: FILE_COUNT, signalAbortedInsideAStream: 3 };
+      for (const name of Object.keys(expected)) {
+        const runs = await inChild(name, { kind: 'json', files, entries: expected[name] });
         assertNoCrash(runs);
         assertAborted(runs.upstream.result, 'upstream');
         assertAborted(runs.port.result, 'port');
         assertSameRun('json', runs);
+        for (const run of [runs.upstream.result, runs.port.result]) {
+          assert.equal(selectEvents(run.events, ['entry']).length, expected[name], `${name}: 'entry' events`);
+          assert.equal(selectEvents(run.events, ['progress']).length, expected[name], `${name}: 'progress' events`);
+        }
       }
     });
   });
@@ -532,22 +594,23 @@ describe('differential: destroyed engines, comments and names out of contract, V
   });
 
   describe('R5: a deflated buffer entry completes at least one turn before upstream (V3)', function () {
-    // Compares the order of events that race an fs call against a compressor in each
-    // implementation. On a loaded runner the race occasionally resolves the other way
-    // (issue #20), so a failed case is run again before it counts.
-    this.retries(2);
+    // The lstat of the missing file and the compressor of the buffer entry race in upstream: both are on the
+    // thread pool. The scenario answers the lstat itself, in a turn it chooses (issue #20).
     const missing = () => path.join(root, 'no-such-dir', 'missing.txt');
+    const summary = (run) =>
+      selectEvents(run.events).map((record) =>
+        record.event === 'progress'
+          ? { event: 'progress', entries: record.payload.entries }
+          : { event: record.event, name: record.payload.name, code: record.payload.code }
+      );
 
     it("zip, deflated: port emits 'entry' and 'progress' before the ENOENT 'warning', upstream after it", async function () {
-      const { upstream, port } = await runBoth(missingFileThenBuffer, { args: { options: {}, missing: missing() } });
+      const { upstream, port } = await runBoth(missingFileThenBuffer, {
+        args: { options: {}, missing: missing(), lstat: 'first-turn' },
+      });
       assert.equal(upstream.error, null);
       assert.equal(port.error, null);
-      const summary = (run) =>
-        selectEvents(run.events).map((record) =>
-          record.event === 'progress'
-            ? { event: 'progress', entries: record.payload.entries }
-            : { event: record.event, name: record.payload.name, code: record.payload.code }
-        );
+      // upstream: the lstat answered in the turn it was asked in, the two zlib answers of the entry need two
       assert.deepStrictEqual(summary(upstream), [
         { event: 'warning', name: 'Error', code: 'ENOENT' },
         { event: 'entry', name: 'x.txt', code: undefined },
@@ -572,9 +635,23 @@ describe('differential: destroyed engines, comments and names out of contract, V
       assert.deepStrictEqual(y.entries[0].local.bytes, u.entries[0].local.bytes);
     });
 
+    it("zip, deflated: an lstat that answers after the entry completed gives upstream the order of port", async function () {
+      const { upstream, port } = await runBoth(missingFileThenBuffer, {
+        args: { options: {}, missing: missing(), lstat: 'after-entry' },
+      });
+      assert.equal(upstream.error, null);
+      assert.equal(port.error, null);
+      assert.deepStrictEqual(port.events, upstream.events);
+      assert.deepStrictEqual(summary(upstream), [
+        { event: 'entry', name: 'x.txt', code: undefined },
+        { event: 'progress', entries: { total: 2, processed: 1 } },
+        { event: 'warning', name: 'Error', code: 'ENOENT' },
+      ]);
+    });
+
     it('zip, stored: the same scenario is equal in both', async function () {
       const { upstream, port } = await runBoth(missingFileThenBuffer, {
-        args: { options: { store: true }, missing: missing() },
+        args: { options: { store: true }, missing: missing(), lstat: 'first-turn' },
       });
       assert.equal(upstream.error, null);
       assert.equal(port.error, null);
