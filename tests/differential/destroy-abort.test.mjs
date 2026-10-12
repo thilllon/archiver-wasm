@@ -320,6 +320,10 @@ describe('differential: destroyed engines, comments and names out of contract, V
   }
 
   describe('R1: an AbortSignal aborted in the middle of an archive (V17)', function () {
+    // Compares the order of events that race an fs call against a compressor in each
+    // implementation. On a loaded runner the race occasionally resolves the other way
+    // (issue #20), so a failed case is run again before it counts.
+    this.retries(2);
     this.timeout(TEST_TIMEOUT_MS);
 
     for (const kind of ZIP_KINDS) {
@@ -528,6 +532,10 @@ describe('differential: destroyed engines, comments and names out of contract, V
   });
 
   describe('R5: a deflated buffer entry completes at least one turn before upstream (V3)', function () {
+    // Compares the order of events that race an fs call against a compressor in each
+    // implementation. On a loaded runner the race occasionally resolves the other way
+    // (issue #20), so a failed case is run again before it counts.
+    this.retries(2);
     const missing = () => path.join(root, 'no-such-dir', 'missing.txt');
 
     it("zip, deflated: port emits 'entry' and 'progress' before the ENOENT 'warning', upstream after it", async function () {

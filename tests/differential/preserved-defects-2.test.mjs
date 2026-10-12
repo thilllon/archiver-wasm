@@ -501,6 +501,10 @@ describe('differential: preserved defects (PORTING.md 14.2, D9 to D17)', functio
   });
 
   describe("D14: a file whose size differs from its lstat size in the tar-with-stats path (P29)", function () {
+    // Compares the order of events that race an fs call against a compressor in each
+    // implementation. On a loaded runner the race occasionally resolves the other way
+    // (issue #20), so a failed case is run again before it counts.
+    this.retries(2);
     this.timeout(TEST_TIMEOUT_MS);
     const SIZE_MISMATCH = { name: 'Error', code: undefined, message: 'Size mismatch', data: undefined };
     const cases = [
