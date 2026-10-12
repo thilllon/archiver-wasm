@@ -122,19 +122,26 @@ jobs:
           from="$RUNNER_TEMP/version"
           test "$(git rev-parse HEAD)" = "$BASE_SHA"
           # A re-run of an old run must not open a version pull request against a newer main.
-          test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)" = "$BASE_SHA" || { echo 'main has moved since this run started; the release run of the newer push takes over.'; exit 1; }
+          current=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)
+          if [ "$current" != "$BASE_SHA" ]; then
+            echo 'main has moved since this run started; the release run of the newer push takes over.'
+            exit 1
+          fi
           [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
           git switch --force-create automation/releases
 
           # The consumed Changesets: tracked files of .changeset with plain names, removed.
           test -s "$from/consumed.txt"
           while IFS= read -r file; do
-            [[ "$file" =~ ^\.changeset/[A-Za-z0-9_-]+\.md$ ]] && [ "$file" != .changeset/README.md ]
+            # One test per line: errexit ignores a failure on the left of && or ||.
+            [[ "$file" =~ ^\.changeset/[A-Za-z0-9_-]+\.md$ ]]
+            [ "$file" != .changeset/README.md ]
             git rm --quiet -- "$file"
           done < "$from/consumed.txt"
 
           # The changelog: text, of a sane size, with no NUL byte.
-          test -f "$from/CHANGELOG.md" && test ! -L "$from/CHANGELOG.md"
+          test -f "$from/CHANGELOG.md"
+          test ! -L "$from/CHANGELOG.md"
           test "$(wc -c < "$from/CHANGELOG.md")" -lt 1048576
           tr -d '\000' < "$from/CHANGELOG.md" | cmp --silent - "$from/CHANGELOG.md"
           grep --quiet --fixed-strings --line-regexp "## $VERSION" "$from/CHANGELOG.md"
@@ -235,7 +242,8 @@ jobs:
           test "$current" = "$BASE_SHA" || { echo 'main changed during validation; the release run of that push refreshes the pull request.'; exit 1; }
           gh pr merge "$RELEASE_PR" --squash --match-head-commit "$RELEASE_SHA" --delete-branch
           merged=$(gh pr view "$RELEASE_PR" --json mergeCommit --jq .mergeCommit.oid)
-          test -n "$merged" && test "$merged" != null
+          test -n "$merged"
+          test "$merged" != null
           test "$(gh api "repos/$GH_REPO/git/commits/$merged" --jq .tree.sha)" = "$VALIDATED_TREE"
 
       # A merge made with GITHUB_TOKEN starts no push workflow, so the publishing run is
