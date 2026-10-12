@@ -353,7 +353,7 @@ jobs:
             *) echo "no pinned wasm-pack archive for $(uname -s)-$(uname -m)"; exit 1 ;;
           esac
           name="wasm-pack-v${WASM_PACK_VERSION}-${target}"
-          curl --fail --silent --show-error --location --retry 3 --output "$RUNNER_TEMP/$name.tar.gz" \
+          curl --fail --silent --show-error --location --retry 8 --retry-delay 5 --retry-all-errors --output "$RUNNER_TEMP/$name.tar.gz" \
             "https://github.com/wasm-bindgen/wasm-pack/releases/download/v${WASM_PACK_VERSION}/$name.tar.gz"
           echo "$sum  $RUNNER_TEMP/$name.tar.gz" | shasum -a 256 --check
           tar -xzf "$RUNNER_TEMP/$name.tar.gz" -C "$RUNNER_TEMP"
