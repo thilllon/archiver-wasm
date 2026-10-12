@@ -636,7 +636,7 @@ crates/archiver-wasm/src/lib.rs                   wasm-bindgen classes (pinned s
 
 package.json  package-lock.json  tsconfig.json  tsdown.config.ts  .gitattributes   (pinned, 15; there is deliberately no .mocharc file, 14.1)
 .github/workflows/ci.yml                     Linux and macOS, Node 18/20/22/24: build under Node 24, the whole test matrix under each (15.5)
-.github/workflows/release.yml                publish to npm from a version tag through the trusted publisher (15.5)
+.github/workflows/release.yml                version, publish and tag from main through the trusted publisher (15.5)
 src/index.ts                                 node-archiver/index.js + package entry (the ESM bundle is built from it)
 src/commonjs.ts                              CommonJS entry: the vending function merged with a namespace of every export (pinned, 15.4)
 src/core.ts                                  node-archiver/lib/core.js (+ archiver 7 setFormat/setModule/_moduleSupports)
@@ -683,6 +683,7 @@ scripts/fetch-upstream.sh                    exists; restores .upstream/ includi
 scripts/build-wasm.sh                        (pinned, 15.2)
 scripts/check-wasm-types.mjs                 fails the build if the generated dist/wasm/archiver_wasm.d.cts does not satisfy src/wasm-types.ts (15.3)
 scripts/check-tarball.mjs                    packs the built dist/, checks the file list, installs the tarball into an empty project, runs the smoke checks (15.5)
+scripts/sync-version.mjs                     copies the version of package.json into the crates, Cargo.lock and this guide; --check fails on a stale copy (15.5)
 scripts/vendor-upstream-tests.mjs            copies the upstream test trees into tests/upstream/ and writes SHA256SUMS
 scripts/verify-upstream-tests.mjs            fails if a vendored test file differs from SHA256SUMS
 scripts/verify-oracle-versions.mjs           fails unless the installed upstream packages have the versions of the oracle table (14.2)
@@ -5060,6 +5061,7 @@ is the version that is published. The exact versions of `typescript`, `tsx` and
   "dependencies": { "minimatch": "^10.2.2", "streamx": "^2.28.1" },
   "devDependencies": {
     "@arethetypeswrong/core": "0.18.5",
+    "@changesets/cli": "3.0.3",
     "@types/mocha": "10.0.10",
     "@types/node": "18.19.130",
     "aes-js": "3.1.2",
@@ -5180,37 +5182,79 @@ module cache once.
 With `--spec <package spec>` it packs nothing and installs that spec instead, so that the
 same checks can be run against the registry.
 
-`.github/workflows/ci.yml` (scaffold unit): on every push and pull request; matrix
+`.github/workflows/ci.yml` (scaffold unit): on every push to `main`, on every pull request,
+and on a dispatch by `release.yml` with the inputs `expected_sha` and `run_key` (the run is
+named after `run_key`, which is how `release.yml` finds it). A new push to a pull request
+cancels that pull request's running checks; pushes to `main` and dispatched runs always
+finish. Matrix
 `ubuntu-latest` and `macos-latest` by Node 18, 20, 22, 24. Every job installs and builds
 under Node 24, because tsdown does not run under Node 18 or 20 (15.4), then switches to
-the Node of the matrix for the tests. Steps: checkout, install `7z`
+the Node of the matrix for the tests. Steps: on a dispatched run, fail unless `GITHUB_SHA`
+equals `expected_sha`; checkout, install `7z`
 (`p7zip-full` with apt, `p7zip` with brew; TESTS-092), set up Node 24, install the Rust
 toolchain named by `rust-toolchain.toml` with the wasm32 target, `rustfmt` and `clippy`
 (`rustup toolchain install` with the channel read from that file), restore the cache of
 cargo downloads (`~/.cargo/registry`; no dependency is a git dependency, so
 `~/.cargo/git` is not cached) and of the `wasm-bindgen` CLI that `wasm-pack` fetches, install `wasm-pack`
 at the pinned version from its release archive, verified against a recorded SHA-256
-(12.3), `npm ci`, `cargo fmt --check`, `cargo clippy --workspace -- -D warnings`,
+(12.3), `npm ci`, `node scripts/sync-version.mjs --check`, `cargo fmt --check`, `cargo clippy --workspace -- -D warnings`,
 `npm run build`, `npm run typecheck`, set up the Node of the matrix, `npm test`,
 `node scripts/check-tarball.mjs`.
 
-`.github/workflows/release.yml` (scaffold unit): on a pushed tag `v<version>`, three jobs.
-`build` fails unless the tag equals the `version` of `package.json`; same setup as CI on
-`ubuntu-latest` with Node 24; `npm ci`; `npm run prepublishOnly`; `npm pack --ignore-scripts`;
-uploads the archive as an artifact. It has no `id-token` permission, so build and test code
-cannot request the OIDC identity. `publish` is the only job with `id-token: write`; it checks
-out nothing, downloads the archive, requires npm 11.5.1 or later (Node 24) and runs
-`npm publish <archive> --ignore-scripts --access public`. npm exchanges the OIDC identity of
-the workflow for publish access (trusted publisher) and attaches provenance. No npm token
-is stored in the repository. `verify`: it checks out the repository and sets up Node, and runs no `npm ci`, because the script
-it runs imports only Node built-ins. `npm view archiver-wasm@<version> version` must print
-the version, and a fresh `npm install archiver-wasm@<version>` in an empty project must
-pass the smoke checks of section 16 item 4
-(`node scripts/check-tarball.mjs --spec archiver-wasm@<version>`).
+`.github/workflows/release.yml` (scaffold unit): on every push to `main`, and on a manual
+dispatch. Changesets (`@changesets/cli`, `.changeset/`) is the one versioning engine: a pull
+request that changes what the package does carries a Changeset file naming the bump
+(`npx changeset`), and nobody edits a version by hand. `package.json` holds the version;
+`scripts/sync-version.mjs` copies it into the two crates, `Cargo.lock` and the snippets of
+this guide, and CI fails on a copy that disagrees (`--check`).
+
+The jobs, in order:
+
+- `prepare` checks out the event commit with a read-only token. With pending Changesets it
+  runs `changeset version` (which consumes them and writes `CHANGELOG.md`) and uploads three
+  things: the next version, the changelog and the names of the consumed Changesets. Without
+  them it asks the registry whether the version of `package.json` is already served.
+- `propose` (pending Changesets only) is the only job that pushes a branch. `prepare` ran
+  dependencies, so `propose` applies nothing it produced: it checks the version shape, the
+  changelog (text, with the heading of that version) and the Changeset names, removes those
+  Changesets, writes the version into `package.json` and `package-lock.json` itself, runs
+  `scripts/sync-version.mjs` of the event commit (Node built-ins only), commits to
+  `automation/releases` and opens or refreshes the version pull request. It installs nothing.
+- `validate` (version pull request only). A pull request opened with `GITHUB_TOKEN` only gets
+  a `pull_request` run that waits for approval and never runs a job, so the whole matrix of `ci.yml` is dispatched on the version commit, with the
+  expected commit and a unique run key, and awaited.
+- `merge` (version pull request only) squashes the pull request only if its head is the
+  validated commit and `main` has not moved, checks that the merged tree is the validated
+  tree, and dispatches a new run of this workflow on `main`, because a merge made with
+  `GITHUB_TOKEN` starts none. A run that merges a version pull request never publishes.
+- `build` (no pending Changesets, version not on npm). Same setup as CI on `ubuntu-latest`
+  with Node 24; `npm ci`; `npm run prepublishOnly`; `npm pack --ignore-scripts`; uploads the
+  archive as an artifact. It has no `id-token` permission, so build and test code cannot
+  request the OIDC identity.
+- `publish` is the only job with `id-token: write`. It checks out nothing, downloads the
+  archive, requires npm 11.5.1 or later (Node 24) and runs
+  `npm publish <archive> --ignore-scripts --access public`. npm exchanges the OIDC identity of
+  the workflow for publish access (trusted publisher) and attaches provenance. No npm token
+  is stored in the repository.
+- `tag` creates `v<version>` on the published commit.
+- `verify` checks out the repository and sets up Node, and runs no `npm ci`, because the
+  script it runs imports only Node built-ins. `npm view archiver-wasm@<version> version` must
+  print the version, and a fresh `npm install archiver-wasm@<version>` in an empty project
+  must pass the smoke checks of section 16 item 4
+  (`node scripts/check-tarball.mjs --spec archiver-wasm@<version>`).
+
+`build`, `publish`, `tag` and `verify` run only while the repository Actions variable
+`NPM_PUBLISH_ENABLED` is exactly `true`. A run that finds the version already on npm does
+nothing. If the upload never reached npm, run the workflow again from the Actions tab. If
+npm already serves the version but `publish`, `tag` or `verify` failed, use "Re-run failed
+jobs" on that run: `publish` skips an upload the registry already has, and a new run would
+skip all four jobs. Prerelease versions are not supported: every publication goes to the
+`latest` dist-tag, and `scripts/sync-version.mjs` rejects any other version shape.
+`cleanup` deletes the unapproved `pull_request` run of the merged version commit.
+Several pending Changesets combine into one bump, the strongest one requested.
 
 One-time owner setup. npm registers a trusted publisher only for a package that exists,
-so the first version is published with the owner's own authentication:
-`npm run prepublishOnly && npm publish --ignore-scripts --otp=<code>`. Then the owner
+so the first version (0.1.0) was published with the owner's own authentication. The owner
 registers the trusted publisher of `archiver-wasm` on npmjs.com (package Settings,
 Trusted Publisher, GitHub Actions) or with
 `npm trust github archiver-wasm --repo thilllon/archiver-wasm --file release.yml --allow-publish`:
@@ -5223,7 +5267,8 @@ Trusted Publisher, GitHub Actions) or with
 | Environment       | empty; the workflow does not name an environment         |
 
 The workflow filename is part of the registration. `release.yml` is never renamed or moved.
-Every later version is published by pushing its tag.
+The repository setting "Allow GitHub Actions to create and approve pull requests" must be
+on, squash merging must be allowed, and the variable `NPM_PUBLISH_ENABLED` must be `true`.
 
 ---
 

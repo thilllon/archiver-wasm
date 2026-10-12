@@ -1,13 +1,27 @@
 # PORTING.md 15.5. Build and the whole test matrix on Linux and macOS, on every supported Node major.
 name: ci
+run-name: ${{ inputs.run_key || github.event.pull_request.title || github.event.head_commit.message || 'ci' }}
 
 on:
   push:
     branches: [main]
   pull_request:
+  # release.yml dispatches this on the version commit it is about to merge (15.5).
+  workflow_dispatch:
+    inputs:
+      expected_sha:
+        description: Exact commit required by the release workflow
+        type: string
+        required: true
+      run_key:
+        description: Unique release validation identifier
+        type: string
+        required: true
 
+# A new push to a pull request cancels that pull request's running checks. Pushes to main
+# and dispatched runs each get their own group and always finish.
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.event_name == 'pull_request' && format('pull-request-{0}', github.event.pull_request.number) || github.run_id }}
   cancel-in-progress: true
 
 permissions:
@@ -27,6 +41,12 @@ jobs:
         os: [ubuntu-latest, macos-latest]
         node: [18, 20, 22, 24]
     steps:
+      - name: A dispatched run must be on the commit the release workflow named
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+        run: test "$GITHUB_SHA" = "$EXPECTED_SHA"
+
       - uses: actions/checkout@v4
 
       - name: Install 7z (apt)
@@ -77,6 +97,7 @@ jobs:
           test "$("$RUNNER_TEMP/$name/wasm-pack" --version)" = "wasm-pack ${WASM_PACK_VERSION}"
 
       - run: npm ci
+      - run: node scripts/sync-version.mjs --check
       - run: cargo fmt --check
       - run: cargo clippy --workspace -- -D warnings
       - run: npm run build
