@@ -617,7 +617,7 @@ crates/ykk-wasm/src/lib.rs                   wasm-bindgen classes (pinned signat
 
 package.json  package-lock.json  tsconfig.json  tsup.config.ts  .gitattributes   (pinned, 15; there is deliberately no .mocharc file, 14.1)
 .github/workflows/ci.yml                     Linux and macOS, Node 18/20/22/24: build and the whole test matrix (15.5)
-.github/workflows/release.yml                publish to npm from a version tag (15.5)
+.github/workflows/release.yml                publish to npm from a version tag through the trusted publisher (15.5)
 src/index.ts                                 node-archiver/index.js + package entry
 src/core.ts                                  node-archiver/lib/core.js (+ archiver 7 setFormat/setModule/_moduleSupports)
 src/error.ts                                 node-archiver/lib/error.js
@@ -5078,15 +5078,35 @@ at the pinned version from its release archive, verified against a recorded SHA-
 (12.3), `npm ci`, `cargo fmt --check`, `cargo clippy --workspace -- -D warnings`,
 `npm run build`, `npm run typecheck`, `npm test`, `node scripts/check-tarball.mjs`.
 
-`.github/workflows/release.yml` (scaffold unit): on a pushed tag `v<version>`; fails unless
-the tag equals the `version` of `package.json`; same setup as CI on `ubuntu-latest` with
-Node 22; `npm ci`; `npm run prepublishOnly` in a step that has no credentials; then
-`npm publish --ignore-scripts` in its own step, the only one that receives the repository
-secret `NPM_TOKEN` (build and test code never sees the token); then `npm view @thilllon/ykk@<version> version`
-must print the version, and a fresh `npm install @thilllon/ykk@<version>` in an empty
-project must pass the smoke checks of section 16 item 4
-(`node scripts/check-tarball.mjs --spec @thilllon/ykk@<version>`). The secret is the one thing the
-repository owner has to provide.
+`.github/workflows/release.yml` (scaffold unit): on a pushed tag `v<version>`, three jobs.
+`build` fails unless the tag equals the `version` of `package.json`; same setup as CI on
+`ubuntu-latest` with Node 22; `npm ci`; `npm run prepublishOnly`; `npm pack --ignore-scripts`;
+uploads the archive as an artifact. It has no `id-token` permission, so build and test code
+cannot request the OIDC identity. `publish` is the only job with `id-token: write`; it checks
+out nothing, downloads the archive, requires npm 11.5.1 or later (Node 24) and runs
+`npm publish <archive> --ignore-scripts --access public`. npm exchanges the OIDC identity of
+the workflow for publish access (trusted publisher) and attaches provenance. No npm token
+is stored in the repository. `verify`: `npm view @thilllon/ykk@<version> version` must print
+the version, and a fresh `npm install @thilllon/ykk@<version>` in an empty project must
+pass the smoke checks of section 16 item 4
+(`node scripts/check-tarball.mjs --spec @thilllon/ykk@<version>`).
+
+One-time owner setup. npm registers a trusted publisher only for a package that exists,
+so the first version is published with the owner's own authentication:
+`npm run prepublishOnly && npm publish --ignore-scripts --otp=<code>`. Then the owner
+registers the trusted publisher of `@thilllon/ykk` on npmjs.com (package Settings,
+Trusted Publisher, GitHub Actions) or with
+`npm trust github @thilllon/ykk --repo thilllon/ykk --file release.yml --allow-publish`:
+
+| Setting           | Value                                                    |
+| ----------------- | -------------------------------------------------------- |
+| Owner             | `thilllon`                                               |
+| Repository        | `ykk`                                                    |
+| Workflow filename | `release.yml`                                            |
+| Environment       | empty; the workflow does not name an environment         |
+
+The workflow filename is part of the registration. `release.yml` is never renamed or moved.
+Every later version is published by pushing its tag.
 
 ---
 

@@ -1,4 +1,8 @@
 # PORTING.md 15.5. Publishes the version named by a pushed tag v<version> to npm.
+#
+# The npm trusted publisher of @thilllon/ykk is registered with this workflow filename.
+# Never rename or move this file: npm checks the calling workflow file of an OIDC
+# publication, and a publication from any other file is rejected.
 name: release
 
 on:
@@ -12,8 +16,11 @@ env:
   WASM_PACK_VERSION: 0.15.0 # PORTING.md 12.3, fixed by the toolchain gate (2.2)
 
 jobs:
-  publish:
+  # Builds, tests and packs without the id-token permission, so no build script, test or
+  # dev dependency can request the OIDC identity that npm exchanges for publish access.
+  build:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
@@ -27,7 +34,6 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          registry-url: https://registry.npmjs.org
 
       - name: Install the Rust toolchain of rust-toolchain.toml
         run: |
@@ -53,17 +59,62 @@ jobs:
 
       - run: npm ci
 
-      # Build, run the whole test matrix and check the tarball WITHOUT the npm token in the
-      # environment, so no build script, test or dev dependency can read it.
-      - name: Build, test and check the tarball (no credentials)
+      - name: Build, test and check the tarball
         run: npm run prepublishOnly
 
-      # Lifecycle scripts are disabled for the publish itself: the only process that sees the
-      # token is npm uploading the already built tree.
+      # The archive that was just built and tested is the one that gets published.
+      - name: Pack
+        run: |
+          mkdir "$RUNNER_TEMP/tarball"
+          npm pack --ignore-scripts --pack-destination "$RUNNER_TEMP/tarball"
+          test "$(ls "$RUNNER_TEMP/tarball" | wc -l)" -eq 1
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tarball
+          path: ${{ runner.temp }}/tarball/*.tgz
+          if-no-files-found: error
+          retention-days: 7
+
+  # The only job with id-token: write. It runs no repository code: it downloads the packed
+  # archive and uploads it. npm exchanges the OIDC identity of this workflow for publish
+  # access (trusted publisher) and attaches provenance; no token is stored anywhere.
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: tarball
+          path: tarball
+
+      # No registry-url: it would write a token placeholder into .npmrc.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: npm must support trusted publishing (11.5.1 or later)
+        run: node -e "const [a,b,c]=process.argv[1].split('.').map(Number); process.exit(a>11||(a===11&&(b>5||(b===5&&c>=1)))?0:1)" "$(npm --version)"
+
       - name: Publish
-        run: npm publish --ignore-scripts
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish ./tarball/*.tgz --ignore-scripts --access public
+
+  verify:
+    needs: publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
 
       - name: The registry must serve the version
         run: |
