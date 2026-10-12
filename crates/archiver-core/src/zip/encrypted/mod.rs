@@ -1,4 +1,4 @@
-// crates/ykk-core/src/zip/encrypted/mod.rs   (written by unit rs-zip20)
+// crates/archiver-core/src/zip/encrypted/mod.rs   (written by unit rs-zip20)
 pub mod aes_hmac_etm_stream;
 pub mod crc;
 pub mod crypto_cipher;

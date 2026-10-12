@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // PORTING.md 14.3: drives the upstream engines directly with fixed inputs and writes the
-// golden files of crates/ykk-core/tests/golden/ and tests/vectors/sanitize-path.json.
+// golden files of crates/archiver-core/tests/golden/ and tests/vectors/sanitize-path.json.
 // Re-run only when an upstream pin changes (PORTING.md 14.6).
 process.env.TZ = 'UTC';
 
@@ -13,7 +13,7 @@ import { PassThrough } from 'node:stream';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const goldenDir = path.join(root, 'crates', 'ykk-core', 'tests', 'golden');
+const goldenDir = path.join(root, 'crates', 'archiver-core', 'tests', 'golden');
 const vectorsDir = path.join(root, 'tests', 'vectors');
 const require = createRequire(import.meta.url);
 

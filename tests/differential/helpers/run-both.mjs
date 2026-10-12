@@ -1,16 +1,16 @@
 // tests/differential/helpers/run-both.mjs
 // Scenario runner of the differential tests (PORTING.md 14.2).
 //
-//   runBoth(scenario, options)          -> { upstream, ykk }, run in this process, upstream first
+//   runBoth(scenario, options)          -> { upstream, port }, run in this process, upstream first
 //   runOne(name, scenario, options)     -> { bytes, events, error, pointer, pointerAtEnd, settled, value }
-//   runBothInChild(reference, options)  -> { upstream, ykk }, each
+//   runBothInChild(reference, options)  -> { upstream, port }, each
 //                                          { code, signal, stdout, stderr, crash, unsettled, result }
 //   scenarioReference(moduleUrl, exportName)   the <scenario> argument of `--child <impl> <scenario>`
 //   load(name)                          -> the implementation object a scenario receives
 //
 // A scenario is `async (impl, ctx) => { ... }`. It is called once per implementation.
 //
-//   impl.name                                         'upstream' or 'ykk'
+//   impl.name                                         'upstream' or 'port'
 //   impl.Archiver, ZipArchive, TarArchive, JsonArchive, ArchiverError     the archiver 8 surface
 //   impl.archiver                                     the archiver 7 vending function, 'zip-encrypted' registered
 //   impl.ZipEncrypted, ZipAesStream, ZipCryptoStream, AesHmacEtmStream, CryptoStream, DecryptoStream, CryptoCipher
@@ -23,7 +23,7 @@
 //   ctx.args                                    options.args
 //
 // ctx.create('aes256' | 'zip20', options) hands the implementation a copy of `options` with
-// `encryptionMethod` (and for ykk `zip20Header`) added. A case about the caller's options object itself
+// `encryptionMethod` (and for port `zip20Header`) added. A case about the caller's options object itself
 // (V15 (a), case A4) calls impl.archiver.create with its own object and passes the archive to ctx.track.
 //
 // result:
@@ -34,7 +34,7 @@
 // options:
 //   clock    milliseconds or a Date: `new Date()` and `Date.now()` answer it during both runs
 //   random   12 bytes (Buffer or hex): every crypto.randomBytes(12) of the upstream run returns them,
-//            and ctx.create('zip20') passes them to ykk as zip20Header (V10)
+//            and ctx.create('zip20') passes them to port as zip20Header (V10)
 //   wait     'end' (default: until every tracked stream ended), 'none', or milliseconds
 //   endTimeout   milliseconds: bound of the 'end' wait; past it the tracked streams are destroyed and the
 //            run rejects. Without it the wait is unbounded (the slow cases run with --timeout 0).
@@ -64,7 +64,7 @@ const require = createRequire(import.meta.url);
 const SELF = fileURLToPath(import.meta.url);
 
 const ROOT = path.resolve(path.dirname(SELF), '../../..');
-const IMPLEMENTATIONS = ['upstream', 'ykk'];
+const IMPLEMENTATIONS = ['upstream', 'port'];
 export const CRASH_EXIT_CODE = 7;
 const UNSETTLED_EXIT_CODE = 8;
 export const HANG_QUIET_MS = 500;
@@ -109,14 +109,14 @@ async function loadUpstream() {
 // the published package: the ESM entry for the archiver 8 surface, the CommonJS entry for the archiver 7
 // surface, as the two upstream suites use them (PORTING.md 14.1). The two bundles share one
 // format registry and one wasm instance (15.4).
-async function loadYkk() {
+async function loadPort() {
   const ns = await import(pathToFileURL(path.join(ROOT, 'dist/index.mjs')).href);
   const archiver = require(path.join(ROOT, 'dist/index.cjs'));
   if (!archiver.isRegisteredFormat('zip-encrypted')) {
     archiver.registerFormat('zip-encrypted', archiver.ZipEncrypted);
   }
   return {
-    name: 'ykk',
+    name: 'port',
     Archiver: ns.Archiver,
     ZipArchive: ns.ZipArchive,
     TarArchive: ns.TarArchive,
@@ -138,7 +138,7 @@ export function load(name) {
     throw new Error(`run-both: unknown implementation ${JSON.stringify(name)}`);
   }
   if (!loaded.has(name)) {
-    loaded.set(name, name === 'upstream' ? loadUpstream() : loadYkk());
+    loaded.set(name, name === 'upstream' ? loadUpstream() : loadPort());
   }
   return loaded.get(name);
 }
@@ -260,7 +260,7 @@ function createArchive(impl, format, options, zip20Header) {
     case 'zip20':
       return impl.archiver.create(
         'zip-encrypted',
-        impl.name === 'ykk' && zip20Header !== undefined
+        impl.name === 'port' && zip20Header !== undefined
           ? { zip20Header: Buffer.from(zip20Header), ...options, encryptionMethod: 'zip20' }
           : { ...options, encryptionMethod: 'zip20' }
       );
@@ -412,8 +412,8 @@ export async function runOne(name, scenario, options = {}) {
 
 export async function runBoth(scenario, options = {}) {
   const upstream = await runOne('upstream', scenario, options);
-  const ykk = await runOne('ykk', scenario, options);
-  return { upstream, ykk };
+  const port = await runOne('port', scenario, options);
+  return { upstream, port };
 }
 
 export function scenarioReference(moduleUrl, exportName) {
@@ -526,8 +526,8 @@ function runChild(name, reference, options = {}) {
 
 export async function runBothInChild(reference, options = {}) {
   const upstream = await runChild('upstream', reference, options);
-  const ykk = await runChild('ykk', reference, options);
-  return { upstream, ykk };
+  const port = await runChild('port', reference, options);
+  return { upstream, port };
 }
 
 async function importScenario(reference) {

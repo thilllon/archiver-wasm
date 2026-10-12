@@ -1,11 +1,24 @@
 {
-  "name": "@thilllon/ykk",
+  "name": "archiver-wasm",
   "version": "0.1.0",
   "description": "node-archiver ported to Rust and WebAssembly, with ZIP encryption built in",
+  "keywords": [
+    "archiver",
+    "archive",
+    "zip",
+    "tar",
+    "zip-encrypted",
+    "aes",
+    "zipcrypto",
+    "wasm",
+    "webassembly",
+    "rust",
+    "stream"
+  ],
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/thilllon/ykk.git"
+    "url": "git+https://github.com/thilllon/archiver-wasm.git"
   },
   "type": "module",
   "main": "./dist/index.cjs",
@@ -13,12 +26,21 @@
   "types": "./dist/index.d.cts",
   "exports": {
     ".": {
-      "import": { "types": "./dist/index.d.mts", "default": "./dist/index.mjs" },
-      "require": { "types": "./dist/index.d.cts", "default": "./dist/index.cjs" }
+      "import": {
+        "types": "./dist/index.d.mts",
+        "default": "./dist/index.mjs"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
     },
     "./package.json": "./package.json"
   },
-  "files": ["dist", "THIRD_PARTY_NOTICES.md"],
+  "files": [
+    "dist",
+    "THIRD_PARTY_NOTICES.md"
+  ],
   "engines": {
     "node": ">=18"
   },

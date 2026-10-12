@@ -1,5 +1,5 @@
 // tests/differential/tar.test.mjs
-// Differential cases T1 to T6 of PORTING.md 14.2: tar archives of the upstream oracle and of ykk.
+// Differential cases T1 to T6 of PORTING.md 14.2: tar archives of the upstream oracle and of port.
 // The scenarios are exported so that a child process and the extraction checks (14.4) can run them;
 // each takes the fixture tree of makeTree() as ctx.args.root.
 
@@ -42,7 +42,7 @@ function streamOf(chunks) {
 
 // PORTING.md 14.2 (determinism: modes are set by chmod, times by lutimes)
 function makeTree() {
-  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'ykk-diff-tar-')));
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'archiver-wasm-diff-tar-')));
   const write = (rel, data, mode) => {
     const target = path.join(root, rel);
     fs.mkdirSync(path.dirname(target), { recursive: true });
@@ -202,22 +202,22 @@ async function t6(impl, ctx) {
 }
 
 // PORTING.md 14.2 (comparison rules, tar: whole-archive byte equality)
-function assertSameBytes(ykk, upstream) {
+function assertSameBytes(port, upstream) {
   let at = 0;
-  while (at < ykk.length && at < upstream.length && ykk[at] === upstream[at]) {
+  while (at < port.length && at < upstream.length && port[at] === upstream[at]) {
     at++;
   }
-  assert.ok(ykk.equals(upstream), `archives differ at byte ${at} (ykk ${ykk.length} bytes, upstream ${upstream.length} bytes)`);
+  assert.ok(port.equals(upstream), `archives differ at byte ${at} (port ${port.length} bytes, upstream ${upstream.length} bytes)`);
 }
 
 // PORTING.md 14.2 (class D: whole archives, exact event sequences, pointer() at finalize resolution)
-function assertSameRun({ upstream, ykk }) {
+function assertSameRun({ upstream, port }) {
   assert.strictEqual(upstream.error, null);
-  assert.deepStrictEqual(ykk.error, upstream.error);
-  assertSameBytes(ykk.bytes, upstream.bytes);
-  assert.deepStrictEqual(selectEvents(ykk.events), selectEvents(upstream.events));
-  assert.strictEqual(ykk.pointer, upstream.pointer);
-  assert.strictEqual(ykk.pointer, ykk.bytes.length);
+  assert.deepStrictEqual(port.error, upstream.error);
+  assertSameBytes(port.bytes, upstream.bytes);
+  assert.deepStrictEqual(selectEvents(port.events), selectEvents(upstream.events));
+  assert.strictEqual(port.pointer, upstream.pointer);
+  assert.strictEqual(port.pointer, port.bytes.length);
 }
 
 // PORTING.md 14.2 (17.3: every header checksum holds, the archive ends with 1024 zero bytes)
@@ -263,7 +263,7 @@ describe('differential: tar', function () {
     const result = await runBoth(t1, { args: { root } });
     assertSameRun(result);
     const sizes = [0, 0, 0, 6, 1, 511, 512, 513, 1024, 16384, 512, 1000, 600];
-    for (const bytes of [result.upstream.bytes, result.ykk.bytes]) {
+    for (const bytes of [result.upstream.bytes, result.port.bytes]) {
       const tar = assertTarShape(bytes, sizes.length);
       assert.deepStrictEqual(
         tar.entries.map((entry) => entry.header.size),
@@ -281,7 +281,7 @@ describe('differential: tar', function () {
   it('T2: directories by append(), symlink() entries take the clock as mtime and mode 0644 (P10)', async function () {
     const result = await runBoth(t2Appended, { clock: CLOCK, args: { root } });
     assertSameRun(result);
-    for (const bytes of [result.upstream.bytes, result.ykk.bytes]) {
+    for (const bytes of [result.upstream.bytes, result.port.bytes]) {
       const tar = assertTarShape(bytes, 6);
       assert.deepStrictEqual(
         tar.entries.map((entry) => [entry.name, entry.header.typeflag, entry.header.mode]),
@@ -305,7 +305,7 @@ describe('differential: tar', function () {
   it('T2: one directory() over sub-directories and symlinks on disk', async function () {
     const result = await runBoth(t2Directory, { args: { root } });
     assertSameRun(result);
-    for (const bytes of [result.upstream.bytes, result.ykk.bytes]) {
+    for (const bytes of [result.upstream.bytes, result.port.bytes]) {
       const tar = assertTarShape(bytes, 9);
       const byName = entriesByName(bytes);
       assert.deepStrictEqual(
@@ -336,7 +336,7 @@ describe('differential: tar', function () {
   it('T2: file() on a directory', async function () {
     const result = await runBoth(t2File, { args: { root, rel: 'sub', name: 'from-disk' } });
     assertSameRun(result);
-    for (const bytes of [result.upstream.bytes, result.ykk.bytes]) {
+    for (const bytes of [result.upstream.bytes, result.port.bytes]) {
       const tar = assertTarShape(bytes, 1);
       assert.strictEqual(tar.entries[0].name, 'from-disk/');
       assert.strictEqual(tar.entries[0].header.typeflag, '5');
@@ -350,7 +350,7 @@ describe('differential: tar', function () {
     ]) {
       const result = await runBoth(t2File, { args: { root, rel, name: 'from-disk' } });
       assertSameRun(result);
-      for (const bytes of [result.upstream.bytes, result.ykk.bytes]) {
+      for (const bytes of [result.upstream.bytes, result.port.bytes]) {
         const tar = assertTarShape(bytes, 1);
         assert.strictEqual(tar.entries[0].name, 'from-disk');
         assert.strictEqual(tar.entries[0].header.typeflag, '2');
@@ -380,7 +380,7 @@ describe('differential: tar', function () {
       ['non-ascii-target', false],
       ['l'.repeat(101), true],
     ];
-    for (const bytes of [result.upstream.bytes, result.ykk.bytes]) {
+    for (const bytes of [result.upstream.bytes, result.port.bytes]) {
       const tar = assertTarShape(bytes, expected.length);
       assert.deepStrictEqual(
         tar.entries.map((entry) => [entry.name, entry.pax !== null]),
@@ -409,7 +409,7 @@ describe('differential: tar', function () {
   it('T4: mtime 2038, 2080, 2107, before 1970 and Invalid Date (P11)', async function () {
     const result = await runBoth(t4, { args: { root } });
     assertSameRun(result);
-    for (const bytes of [result.upstream.bytes, result.ykk.bytes]) {
+    for (const bytes of [result.upstream.bytes, result.port.bytes]) {
       const tar = assertTarShape(bytes, 10);
       assert.deepStrictEqual(
         tar.entries.map((entry) => [entry.name, field(entry, 'mtime')]),
@@ -432,7 +432,7 @@ describe('differential: tar', function () {
   it('T5: uid, gid, uname, gname without a length limit (P12), devmajor, caller pax, mode 0 and null', async function () {
     const result = await runBoth(t5, { args: { root } });
     assertSameRun(result);
-    for (const bytes of [result.upstream.bytes, result.ykk.bytes]) {
+    for (const bytes of [result.upstream.bytes, result.port.bytes]) {
       const tar = assertTarShape(bytes, 12);
       const byName = entriesByName(bytes);
       assert.strictEqual(field(byName.get('ids'), 'uid'), '001750 \0');
@@ -470,23 +470,23 @@ describe('differential: tar', function () {
   });
 
   it('T6: several fs sources, compared per entry (class N)', async function () {
-    const { upstream, ykk } = await runBoth(t6, { args: { root } });
+    const { upstream, port } = await runBoth(t6, { args: { root } });
     assert.strictEqual(upstream.error, null);
-    assert.deepStrictEqual(ykk.error, upstream.error);
+    assert.deepStrictEqual(port.error, upstream.error);
     const expected = entriesByName(upstream.bytes);
-    const actual = entriesByName(ykk.bytes);
+    const actual = entriesByName(port.bytes);
     assert.deepStrictEqual([...actual.keys()].sort(), [...expected.keys()].sort());
     assert.strictEqual(expected.size, 13);
     for (const [name, entry] of expected) {
       assert.ok(actual.get(name).bytes.equals(entry.bytes), `header and body of ${name}`);
     }
-    assert.strictEqual(ykk.bytes.length, upstream.bytes.length);
-    assert.ok(parseTar(ykk.bytes).trailer.equals(parseTar(upstream.bytes).trailer));
+    assert.strictEqual(port.bytes.length, upstream.bytes.length);
+    assert.ok(parseTar(port.bytes).trailer.equals(parseTar(upstream.bytes).trailer));
     assert.deepStrictEqual(
-      sortEvents(selectEvents(ykk.events, ['entry', 'warning', 'error'])),
+      sortEvents(selectEvents(port.events, ['entry', 'warning', 'error'])),
       sortEvents(selectEvents(upstream.events, ['entry', 'warning', 'error']))
     );
     assert.strictEqual(selectEvents(upstream.events, ['warning']).length, 1);
-    assert.strictEqual(selectEvents(ykk.events, ['progress']).length, selectEvents(upstream.events, ['progress']).length);
+    assert.strictEqual(selectEvents(port.events, ['progress']).length, selectEvents(upstream.events, ['progress']).length);
   });
 });

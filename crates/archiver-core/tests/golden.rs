@@ -4,13 +4,13 @@
 
 use std::io::Read;
 
-use flate2::read::DeflateDecoder;
-use ykk_core::crc32;
-use ykk_core::tar::{overflow, Header, Pack};
-use ykk_core::zip::utils::{normalize_path, sanitize_path};
-use ykk_core::zip::{
+use archiver_core::crc32;
+use archiver_core::tar::{overflow, Header, Pack};
+use archiver_core::zip::utils::{normalize_path, sanitize_path};
+use archiver_core::zip::{
     DateFields, Encryption, EntryOptions, EntryStatus, Source, ZipEntryData, ZipStream,
 };
+use flate2::read::DeflateDecoder;
 
 #[rustfmt::skip]
 #[path = "golden/scenarios.rs"]
@@ -55,7 +55,7 @@ pub struct ZipScenario {
     pub expected: &'static [u8], // include_bytes!("<name>.bin")
 }
 
-// field for field ykk_core::tar::Header
+// field for field archiver_core::tar::Header
 pub struct TarHeader {
     pub name: &'static str,
     pub typeflag_is_5: bool,

@@ -20,6 +20,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "archiver-core"
+version = "0.1.0"
+dependencies = [
+ "aes",
+ "crc32fast",
+ "ctr",
+ "flate2",
+ "hmac",
+ "pbkdf2",
+ "sha1",
+]
+
+[[package]]
+name = "archiver-wasm"
+version = "0.1.0"
+dependencies = [
+ "archiver-core",
+ "wasm-bindgen",
+]
+
+[[package]]
 name = "block-buffer"
 version = "0.10.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -306,25 +327,4 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1a05d73b933a847d6cccdda8f838a22ff101ad9bf93e33684f39c1f5f0eece3d"
 dependencies = [
  "unicode-ident",
-]
-
-[[package]]
-name = "ykk-core"
-version = "0.1.0"
-dependencies = [
- "aes",
- "crc32fast",
- "ctr",
- "flate2",
- "hmac",
- "pbkdf2",
- "sha1",
-]
-
-[[package]]
-name = "ykk-wasm"
-version = "0.1.0"
-dependencies = [
- "wasm-bindgen",
- "ykk-core",
 ]

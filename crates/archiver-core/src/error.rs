@@ -1,7 +1,7 @@
 use std::fmt;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DeflateError(pub String); // "deflate error: {0}"  ykk
+pub struct DeflateError(pub String); // "deflate error: {0}"  archiver-wasm
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ZipError {
@@ -9,12 +9,12 @@ pub enum ZipError {
     AlreadyProcessing, // "already processing an entry"  upstream archive-output-stream.js:59
     MethodNotImplemented(i32), // "compression method {0} not implemented"  upstream zip-archive-output-stream.js:94
     EntryNameRequired, // "entry name must be a non-empty string value"  upstream zip-stream/index.js:115
-    NoEntryOpen, // "no entry is being processed"  ykk (write_data / end_data without an open entry)
-    ExtraTooShort, // "entry extra field is shorter than 11 bytes"  ykk (stands in for readInt16LE RangeError, zip-aes-stream.js:160)
-    InvalidRandomLength { expected: usize, actual: usize }, // "expected {expected} random bytes, got {actual}"  ykk
-    InvalidKeyLength { expected: usize, actual: usize }, // "expected a {expected} byte key, got {actual}"  ykk
-    InvalidEncryption(u8),                               // "unknown encryption method {0}"  ykk
-    Deflate(String),                                     // "deflate error: {0}"  ykk
+    NoEntryOpen, // "no entry is being processed"  archiver-wasm (write_data / end_data without an open entry)
+    ExtraTooShort, // "entry extra field is shorter than 11 bytes"  archiver-wasm (stands in for readInt16LE RangeError, zip-aes-stream.js:160)
+    InvalidRandomLength { expected: usize, actual: usize }, // "expected {expected} random bytes, got {actual}"  archiver-wasm
+    InvalidKeyLength { expected: usize, actual: usize }, // "expected a {expected} byte key, got {actual}"  archiver-wasm
+    InvalidEncryption(u8), // "unknown encryption method {0}"  archiver-wasm
+    Deflate(String),       // "deflate error: {0}"  archiver-wasm
 }
 
 impl fmt::Display for DeflateError {

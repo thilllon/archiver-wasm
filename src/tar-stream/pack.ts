@@ -3,7 +3,7 @@ import type { ReadableOptions } from 'streamx'
 
 import constants from './constants.js'
 import { wasm, toBuffer, wasmString } from '../wasm.js'
-import type { YkkWasm } from '../wasm.js'
+import type { ArchiverWasm } from '../wasm.js'
 
 const { Readable, Writable, getStreamError } = streamx
 
@@ -183,7 +183,7 @@ class Pack extends Readable {
   _finalizing: boolean
   _pending: Sink[]
   _stream: Sink | null
-  _wasm: InstanceType<YkkWasm['WasmPack']>
+  _wasm: InstanceType<ArchiverWasm['WasmPack']>
 
   // deps/tar-stream/pack.js:128
   constructor (opts?: ReadableOptions) {

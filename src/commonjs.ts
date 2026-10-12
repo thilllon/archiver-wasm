@@ -1,4 +1,4 @@
-// The CommonJS entry. `require('@thilllon/ykk')` is the archiver 7 vending function itself, with
+// The CommonJS entry. `require('archiver-wasm')` is the archiver 7 vending function itself, with
 // every export of src/index.ts as a property (archiver 7: `require('archiver')('zip')`).
 import * as m from './index.js';
 

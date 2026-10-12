@@ -1,4 +1,4 @@
-// PORTING.md 14.2 case X1 and 14.4: the ykk archives are opened by tools that share no code with ykk. No upstream source.
+// PORTING.md 14.2 case X1 and 14.4: the port archives are opened by tools that share no code with port. No upstream source.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { once } from 'node:events';
@@ -139,8 +139,8 @@ const OWNER_ENTRIES = [
     source: 'buffer',
     data: Buffer.from('owner'),
     mode: 0o640,
-    options: { name: 'owner.txt', mode: 0o640, uid: 1000, gid: 1001, uname: 'ykk-user', gname: 'ykk-group', devmajor: 7 },
-    tar: { uid: 1000, gid: 1001, uname: 'ykk-user', gname: 'ykk-group', devmaj: 7 },
+    options: { name: 'owner.txt', mode: 0o640, uid: 1000, gid: 1001, uname: 'archiver-wasm-user', gname: 'archiver-wasm-group', devmajor: 7 },
+    tar: { uid: 1000, gid: 1001, uname: 'archiver-wasm-user', gname: 'archiver-wasm-group', devmaj: 7 },
   },
   {
     name: 'pax.txt',
@@ -280,7 +280,7 @@ function walkOf(format, options, key = 'tree') {
   };
 }
 
-// PORTING.md 14.2 (Z12: the class of the engine a ZipArchive runs on; ykk does not export ZipStream by name)
+// PORTING.md 14.2 (Z12: the class of the engine a ZipArchive runs on; port does not export ZipStream by name)
 function zipStreamClass(impl) {
   const archive = new impl.ZipArchive();
   const ZipStream = archive._module.engine.constructor;
@@ -506,10 +506,10 @@ describe('differential: extraction with independent tools (PORTING.md 14.2 X1, 1
   let umask;
   let serial = 0;
 
-  // PORTING.md 14.4 (the ykk archive of one case, written where the command line tools can read it)
+  // PORTING.md 14.4 (the port archive of one case, written where the command line tools can read it)
   async function build(scenario, extension) {
-    const result = await runOne('ykk', scenario, { args });
-    assert.equal(result.error, null, 'ykk: the scenario threw');
+    const result = await runOne('port', scenario, { args });
+    assert.equal(result.error, null, 'port: the scenario threw');
     serial += 1;
     const file = path.join(root, `archive-${serial}.${extension}`);
     fs.writeFileSync(file, result.bytes);
@@ -535,9 +535,9 @@ describe('differential: extraction with independent tools (PORTING.md 14.2 X1, 1
 
   before(async () => {
     await load('upstream');
-    await load('ykk');
+    await load('port');
     umask = process.umask(UMASK);
-    root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'ykk-diff-extraction-')));
+    root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'archiver-wasm-diff-extraction-')));
     const disk = path.join(root, 'disk');
     fs.mkdirSync(disk);
     for (const entry of ENTRIES.filter((candidate) => candidate.source === 'file')) {
@@ -733,9 +733,9 @@ describe('differential: extraction with independent tools (PORTING.md 14.2 X1, 1
 
     it('an archive that reproduces P17 equals upstream byte for byte and is not extracted', async () => {
       const scenario = archiveOf('zip20', { password: PASSWORD, store: true }, P17_ENTRIES);
-      const { upstream, ykk } = await runBoth(scenario, { random: ZIP20_HEADER, args });
+      const { upstream, port } = await runBoth(scenario, { random: ZIP20_HEADER, args });
       assert.equal(upstream.error, null, 'upstream: the scenario threw');
-      assert.equal(ykk.error, null, 'ykk: the scenario threw');
+      assert.equal(port.error, null, 'port: the scenario threw');
       const zip = parseZip(upstream.bytes);
       assert.deepStrictEqual(
         zip.entries.map((entry) => entry.name),
@@ -745,7 +745,7 @@ describe('differential: extraction with independent tools (PORTING.md 14.2 X1, 1
         assert.equal(entry.central.compressedSize, ZIP20_OVERHEAD, `${entry.name}: declared compressed size`);
         assert.equal(entry.payload.length, 0, `${entry.name}: bytes really written`);
       }
-      assert.ok(ykk.bytes.equals(upstream.bytes), 'zip20: archive bytes differ');
+      assert.ok(port.bytes.equals(upstream.bytes), 'zip20: archive bytes differ');
     });
   });
 });

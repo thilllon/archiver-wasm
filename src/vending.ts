@@ -20,7 +20,7 @@ interface Vending {
 
 // One registry for the ES module bundle and the CommonJS bundle of this package: a format
 // registered through `require` is visible to `import` and the reverse (PORTING.md 15.4).
-var REGISTRY = Symbol.for('@thilllon/ykk.formats');
+var REGISTRY = Symbol.for('archiver-wasm.formats');
 var shared = globalThis as { [REGISTRY]?: Record<string, ModuleConstructor> };
 var registered = shared[REGISTRY] !== undefined;
 var formats: Record<string, ModuleConstructor> = shared[REGISTRY] ??= {};

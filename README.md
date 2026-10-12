@@ -1,24 +1,26 @@
-# ykk
+# archiver-wasm
 
 [node-archiver](https://github.com/archiverjs/node-archiver) ported to Rust and WebAssembly for Node.js, with the ZIP encryption of [archiver-zip-encrypted](https://github.com/artem-karpenko/archiver-zip-encrypted) built in and TypeScript types included.
+
+This is an independent port. It is not published or endorsed by the archiver maintainers.
 
 - Same API as archiver 8: `ZipArchive`, `TarArchive`, `JsonArchive`, `append`, `file`, `directory`, `glob`, `symlink`, `finalize`, `abort`, `pointer`, and the same events.
 - The archiver 7 factory is also there: `archiver('zip', options)`, `create`, `registerFormat`, `isRegisteredFormat`.
 - `ZipEncrypted` adds AES-256 (WinZip AE-1) and legacy ZipCrypto.
-- The bytes of every archive are produced in Rust (`crates/ykk-core`) and compiled to WebAssembly. Streams, the file system and callbacks stay in TypeScript.
+- The bytes of every archive are produced in Rust (`crates/archiver-core`) and compiled to WebAssembly. Streams, the file system and callbacks stay in TypeScript.
 - ESM and CommonJS, strict types, no native addon, Node.js 18 or newer.
 
 ## Install
 
 ```sh
-npm install @thilllon/ykk
+npm install archiver-wasm
 ```
 
 ## Usage
 
 ```ts
 import { createWriteStream } from "node:fs";
-import { ZipArchive } from "@thilllon/ykk";
+import { ZipArchive } from "archiver-wasm";
 
 const archive = new ZipArchive({ zlib: { level: 9 } });
 archive.pipe(createWriteStream("out.zip"));
@@ -34,7 +36,7 @@ await archive.finalize();
 Tar and gzipped tar:
 
 ```ts
-import { TarArchive } from "@thilllon/ykk";
+import { TarArchive } from "archiver-wasm";
 
 const archive = new TarArchive({ gzip: true, gzipOptions: { level: 6 } });
 ```
@@ -42,7 +44,7 @@ const archive = new TarArchive({ gzip: true, gzipOptions: { level: 6 } });
 Encrypted ZIP:
 
 ```ts
-import archiver, { ZipEncrypted } from "@thilllon/ykk";
+import archiver, { ZipEncrypted } from "archiver-wasm";
 
 archiver.registerFormat("zip-encrypted", ZipEncrypted);
 
@@ -53,7 +55,7 @@ const archive = archiver.create("zip-encrypted", {
 });
 ```
 
-CommonJS works the same way: `const { ZipArchive } = require("@thilllon/ykk")`.
+CommonJS works the same way: `const { ZipArchive } = require("archiver-wasm")`.
 
 `import` and `require` share one implementation. A format registered through one is visible through the other.
 
@@ -68,7 +70,7 @@ The port follows upstream statement by statement, so behavior matches archiver 8
 
 ## Security notes
 
-ykk reproduces upstream here too. It does not validate what you pass in. If any of these values come from an untrusted source, check them before you call ykk.
+archiver-wasm reproduces upstream here too. It does not validate what you pass in. If any of these values come from an untrusted source, check them before you call archiver-wasm.
 
 - **Entry names and prefixes.** Only a leading `../`, a leading `/` and a leading drive letter are stripped. An interior `..` stays (`a/../../b` is written as is), and a drive letter after a non-empty `prefix` stays. Reject names that contain a `..` segment.
 - **`symlink()` names and targets.** The name passed to `symlink()` is not sanitized in tar and JSON output, and no link target is ever checked. Reject absolute paths and `..` segments in both. `directory()` and `glob()` store the links they find with their targets unchanged, including targets outside the tree.

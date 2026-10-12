@@ -276,18 +276,18 @@ function comparedEvents(kind, run) {
 }
 
 // PORTING.md 14.2 (comparison rules: whole-archive byte equality, the event sequence and pointer())
-function assertSameArchive(kind, { upstream, ykk }) {
+function assertSameArchive(kind, { upstream, port }) {
   assert.equal(upstream.error, null, 'upstream: the scenario threw');
-  assert.equal(ykk.error, null, 'ykk: the scenario threw');
+  assert.equal(port.error, null, 'port: the scenario threw');
   assert.deepStrictEqual(selectEvents(upstream.events, ['error', 'warning']), []);
-  assert.deepStrictEqual(comparedEvents(kind, ykk), comparedEvents(kind, upstream));
+  assert.deepStrictEqual(comparedEvents(kind, port), comparedEvents(kind, upstream));
   if (!ENCRYPTED.includes(kind)) {
-    assert.equal(ordered(ykk.events), ordered(upstream.events), 'key order of the event payloads');
+    assert.equal(ordered(port.events), ordered(upstream.events), 'key order of the event payloads');
   }
-  assert.equal(ykk.bytes.length, upstream.bytes.length, 'archive length');
-  assert.ok(ykk.bytes.equals(upstream.bytes), 'the archives differ');
-  assert.equal(ykk.pointer, upstream.pointer);
-  assert.equal(ykk.pointer, ykk.bytes.length);
+  assert.equal(port.bytes.length, upstream.bytes.length, 'archive length');
+  assert.ok(port.bytes.equals(upstream.bytes), 'the archives differ');
+  assert.equal(port.pointer, upstream.pointer);
+  assert.equal(port.pointer, port.bytes.length);
 }
 
 // PORTING.md 14.2 (helper of the test: the names of the 'entry' events, in order)
@@ -321,8 +321,8 @@ describe('differential: preserved defects (PORTING.md 14.2, D9 to D17)', functio
 
   before(async function () {
     await load('upstream');
-    await load('ykk');
-    root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'ykk-diff-defects-2-')));
+    await load('port');
+    root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'archiver-wasm-diff-defects-2-')));
   });
 
   after(function () {
@@ -369,7 +369,7 @@ describe('differential: preserved defects (PORTING.md 14.2, D9 to D17)', functio
       const runs = await runBoth(nulInTarNames, { clock: CLOCK });
       assertSameArchive('tar', runs);
       assert.deepStrictEqual(entryNames(runs.upstream), ['a\0b.txt', 'dir/c.txt\0', 'link\0name', 'plain-link']);
-      for (const run of [runs.upstream, runs.ykk]) {
+      for (const run of [runs.upstream, runs.port]) {
         const tar = parseTar(run.bytes);
         assert.equal(tar.entries.length, 4);
         // no pax header: the names are ASCII and short
@@ -404,7 +404,7 @@ describe('differential: preserved defects (PORTING.md 14.2, D9 to D17)', functio
     it('tar: names of up to 16000 segments give the same headers as upstream', async function () {
       const runs = await runBoth(manySeparators, { args: { names } });
       assertSameArchive('tar', runs);
-      const tar = parseTar(runs.ykk.bytes);
+      const tar = parseTar(runs.port.bytes);
       assert.equal(tar.entries.length, names.length);
       assert.equal(tar.entries[0].pax, null);
       assert.equal(tar.entries[0].header.prefix, 'a/'.repeat(28).slice(0, -1));
@@ -426,20 +426,20 @@ describe('differential: preserved defects (PORTING.md 14.2, D9 to D17)', functio
         if (ENCRYPTED.includes(kind)) {
           // PORTING.md 3.2 V15 (a): zip-stream 6 writes its sanitized name onto the entry data
           // (archiver-zip-encrypted/node_modules/zip-stream/index.js:77), which archiver 7 then emits;
-          // zip-stream 7 works on a copy, so ykk emits the name symlink() was given. The bytes are equal.
+          // zip-stream 7 works on a copy, so port emits the name symlink() was given. The bytes are equal.
           assert.deepStrictEqual(entryNames(runs.upstream), [...appended, ...written]);
-          assert.deepStrictEqual(entryNames(runs.ykk), [...appended, ...raw]);
-          const events = runs.ykk.events.map((record) => {
+          assert.deepStrictEqual(entryNames(runs.port), [...appended, ...raw]);
+          const events = runs.port.events.map((record) => {
             const isLink = record.event === 'entry' && record.payload.type === 'symlink';
             return isLink
               ? { event: record.event, payload: { ...record.payload, name: written[raw.indexOf(record.payload.name)] } }
               : record;
           });
-          assertSameArchive(kind, { upstream: runs.upstream, ykk: { ...runs.ykk, events } });
+          assertSameArchive(kind, { upstream: runs.upstream, port: { ...runs.port, events } });
         } else {
           assertSameArchive(kind, runs);
           assert.deepStrictEqual(entryNames(runs.upstream), [...appended, ...raw]);
-          assert.deepStrictEqual(entryNames(runs.ykk), [...appended, ...raw]);
+          assert.deepStrictEqual(entryNames(runs.port), [...appended, ...raw]);
         }
         if (kind === 'zip') {
           // zip-stream sanitizes what archiver core did not: only the leading parts go
@@ -476,10 +476,10 @@ describe('differential: preserved defects (PORTING.md 14.2, D9 to D17)', functio
       it(`${format}: a link to its own directory is descended into until ELOOP`, async function () {
         const runs = await runBoth(followedCycle, { args: { dir, format, options } });
         assert.equal(runs.upstream.error, null);
-        assert.equal(runs.ykk.error, null);
+        assert.equal(runs.port.error, null);
         assert.deepStrictEqual(selectEvents(runs.upstream.events, ['error', 'warning']), []);
-        assert.deepStrictEqual(selectEvents(runs.ykk.events), selectEvents(runs.upstream.events));
-        assert.equal(ordered(runs.ykk.events), ordered(runs.upstream.events), 'key order of the event payloads');
+        assert.deepStrictEqual(selectEvents(runs.port.events), selectEvents(runs.upstream.events));
+        assert.equal(ordered(runs.port.events), ordered(runs.upstream.events), 'key order of the event payloads');
         const names = entryNames(runs.upstream);
         // f.txt at every depth, a directory entry for every followed link, and the link the OS refused last
         const depth = (names.length - 2) / 2;
@@ -490,12 +490,12 @@ describe('differential: preserved defects (PORTING.md 14.2, D9 to D17)', functio
         }
         expected.push('loop/'.repeat(depth) + 'f.txt', 'loop/'.repeat(depth) + 'loop');
         assert.deepStrictEqual(names, expected);
-        assert.deepStrictEqual(entryNames(runs.ykk), expected);
+        assert.deepStrictEqual(entryNames(runs.port), expected);
         if (format !== 'json') {
           // the json plugin writes the access times of the stats
-          assert.ok(runs.ykk.bytes.equals(runs.upstream.bytes), 'the archives differ');
+          assert.ok(runs.port.bytes.equals(runs.upstream.bytes), 'the archives differ');
         }
-        assert.equal(runs.ykk.pointer, runs.upstream.pointer);
+        assert.equal(runs.port.pointer, runs.upstream.pointer);
       });
     }
   });
@@ -519,7 +519,7 @@ describe('differential: preserved defects (PORTING.md 14.2, D9 to D17)', functio
             timeout: CHILD_TIMEOUT_MS,
             args: { format, file, statSize, realSize },
           });
-          const { upstream, ykk } = runs;
+          const { upstream, port } = runs;
           for (const [name, run] of Object.entries(runs)) {
             assert.equal(run.code, 0, `${name}: exit code ${run.code}\n${run.stdout}${run.stderr}`);
             assert.equal(run.result.error, null, `${name}: the scenario threw`);
@@ -534,16 +534,16 @@ describe('differential: preserved defects (PORTING.md 14.2, D9 to D17)', functio
           assert.deepStrictEqual(errors, format === 'tar' ? [SIZE_MISMATCH, SIZE_MISMATCH] : [SIZE_MISMATCH, SIZE_MISMATCH, SIZE_MISMATCH]);
           assert.deepStrictEqual(selectEvents(upstream.result.events, ['entry', 'end']), []);
 
-          assert.deepStrictEqual(ykk.result.value, upstream.result.value);
-          assert.deepStrictEqual(ykk.result.events, upstream.result.events);
-          assert.deepStrictEqual(ykk.result.settled, upstream.result.settled);
+          assert.deepStrictEqual(port.result.value, upstream.result.value);
+          assert.deepStrictEqual(port.result.events, upstream.result.events);
+          assert.deepStrictEqual(port.result.settled, upstream.result.settled);
           if (format === 'tar') {
             // the header with the size of the stats, then the bytes that were read
-            assert.ok(ykk.result.bytes.equals(upstream.result.bytes), 'the bytes written before the error differ');
+            assert.ok(port.result.bytes.equals(upstream.result.bytes), 'the bytes written before the error differ');
             assert.equal(upstream.result.bytes.length, 512 + realSize);
           } else {
-            assert.equal(ykk.result.bytes.length, upstream.result.bytes.length);
-            assert.deepStrictEqual(splitGzipHeader(ykk.result.bytes), splitGzipHeader(upstream.result.bytes));
+            assert.equal(port.result.bytes.length, upstream.result.bytes.length);
+            assert.deepStrictEqual(splitGzipHeader(port.result.bytes), splitGzipHeader(upstream.result.bytes));
           }
         });
       }
@@ -576,11 +576,11 @@ describe('differential: preserved defects (PORTING.md 14.2, D9 to D17)', functio
           archiveDestroyed: true,
           engineDestroyed: false,
         });
-        assert.deepStrictEqual(runs.ykk.result.value, runs.upstream.result.value);
+        assert.deepStrictEqual(runs.port.result.value, runs.upstream.result.value);
         assert.deepStrictEqual(eventNames(runs.upstream.result), ['close']);
-        assert.deepStrictEqual(runs.ykk.result.events, runs.upstream.result.events);
+        assert.deepStrictEqual(runs.port.result.events, runs.upstream.result.events);
         assert.deepStrictEqual(runs.upstream.result.settled, []);
-        assert.deepStrictEqual(runs.ykk.result.settled, []);
+        assert.deepStrictEqual(runs.port.result.settled, []);
       });
 
       it(`${kind}: abort() lets the entry end, and the file is closed`, async function () {
@@ -599,22 +599,22 @@ describe('differential: preserved defects (PORTING.md 14.2, D9 to D17)', functio
           archiveDestroyed: true,
           engineDestroyed: false,
         });
-        assert.deepStrictEqual(runs.ykk.result.value, runs.upstream.result.value);
+        assert.deepStrictEqual(runs.port.result.value, runs.upstream.result.value);
         assert.deepStrictEqual(eventNames(runs.upstream.result), ['end', 'close']);
-        assert.deepStrictEqual(runs.ykk.result.events, runs.upstream.result.events);
+        assert.deepStrictEqual(runs.port.result.events, runs.upstream.result.events);
         // P5: the promise of a finalize() that was still deferred never settles
         assert.deepStrictEqual(runs.upstream.result.settled, []);
-        assert.deepStrictEqual(runs.ykk.result.settled, []);
+        assert.deepStrictEqual(runs.port.result.settled, []);
       });
     }
   });
 
   describe('D16: Object.prototype keys count as registered formats (P31)', function () {
     it('isRegisteredFormat is true, create() throws a TypeError, registerFormat() is refused', async function () {
-      const keys = ['constructor', 'toString', 'hasOwnProperty', 'valueOf', '__proto__', 'ykk-diff-not-registered'];
+      const keys = ['constructor', 'toString', 'hasOwnProperty', 'valueOf', '__proto__', 'archiver-wasm-diff-not-registered'];
       const runs = await runBoth(prototypeKeysInTheRegistry, { wait: 'none', args: { keys } });
       assert.equal(runs.upstream.error, null);
-      assert.equal(runs.ykk.error, null);
+      assert.equal(runs.port.error, null);
       const typeError = (message) => ({ thrown: { name: 'TypeError', code: undefined, message, data: undefined } });
       const error = (message) => ({ thrown: { name: 'Error', code: undefined, message, data: undefined } });
       const byKey = new Map(runs.upstream.value.map((row) => [row.key, row]));
@@ -640,17 +640,17 @@ describe('differential: preserved defects (PORTING.md 14.2, D9 to D17)', functio
         });
       }
       // the control: a name nothing has, which the scenario then registers
-      assert.deepStrictEqual(byKey.get('ykk-diff-not-registered'), {
-        key: 'ykk-diff-not-registered',
+      assert.deepStrictEqual(byKey.get('archiver-wasm-diff-not-registered'), {
+        key: 'archiver-wasm-diff-not-registered',
         isRegisteredFormat: { returned: 'boolean' },
         isRegistered: false,
-        create: error('create(ykk-diff-not-registered): format not registered'),
-        call: error('create(ykk-diff-not-registered): format not registered'),
+        create: error('create(archiver-wasm-diff-not-registered): format not registered'),
+        call: error('create(archiver-wasm-diff-not-registered): format not registered'),
         registerFormat: { returned: 'undefined' },
         isRegisteredAfterwards: true,
       });
-      assert.deepStrictEqual(runs.ykk.value, runs.upstream.value);
-      assert.deepStrictEqual(runs.ykk.events, runs.upstream.events);
+      assert.deepStrictEqual(runs.port.value, runs.upstream.value);
+      assert.deepStrictEqual(runs.port.events, runs.upstream.events);
     });
   });
 
@@ -680,13 +680,13 @@ describe('differential: preserved defects (PORTING.md 14.2, D9 to D17)', functio
             random: ZIP20_HEADER,
           });
           assert.equal(runs.upstream.error, null);
-          assert.equal(runs.ykk.error, null);
+          assert.equal(runs.port.error, null);
           assert.deepStrictEqual(eventNames(runs.upstream), expected[turns]);
-          assert.deepStrictEqual(eventNames(runs.ykk), expected[turns]);
+          assert.deepStrictEqual(eventNames(runs.port), expected[turns]);
           const kind = format === 'aes256' ? 'aes256' : format;
-          assert.deepStrictEqual(comparedEvents(kind, runs.ykk), comparedEvents(kind, runs.upstream));
+          assert.deepStrictEqual(comparedEvents(kind, runs.port), comparedEvents(kind, runs.upstream));
           assert.deepStrictEqual(runs.upstream.value, { state, returnsThis: true });
-          assert.deepStrictEqual(runs.ykk.value, runs.upstream.value);
+          assert.deepStrictEqual(runs.port.value, runs.upstream.value);
         });
       }
     }

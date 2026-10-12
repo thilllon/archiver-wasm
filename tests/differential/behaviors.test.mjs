@@ -240,7 +240,7 @@ describe('differential: behaviors no other case reaches (BEHAVIORS.tsv)', functi
   let args;
 
   before(function () {
-    root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'ykk-diff-behaviors-')));
+    root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'archiver-wasm-diff-behaviors-')));
     const write = (rel, data, mode) => {
       const target = path.join(root, rel);
       fs.mkdirSync(path.dirname(target), { recursive: true });
@@ -283,13 +283,13 @@ describe('differential: behaviors no other case reaches (BEHAVIORS.tsv)', functi
 
     for (const [title, options, highWaterMark, statConcurrency, statQueue] of cases) {
       it(title, async function () {
-        const { upstream, ykk } = await runBoth(constructed, { args: { options }, wait: 'none' });
-        assert.equal(ykk.error, null);
-        assert.deepStrictEqual(ykk.value, upstream.value);
-        assert.deepStrictEqual(Object.keys(ykk.value), Object.keys(SURFACES));
+        const { upstream, port } = await runBoth(constructed, { args: { options }, wait: 'none' });
+        assert.equal(port.error, null);
+        assert.deepStrictEqual(port.value, upstream.value);
+        assert.deepStrictEqual(Object.keys(port.value), Object.keys(SURFACES));
         for (const surface of Object.keys(SURFACES)) {
           assert.deepStrictEqual(
-            ykk.value[surface],
+            port.value[surface],
             {
               readableHighWaterMark: highWaterMark,
               writableHighWaterMark: highWaterMark,
@@ -306,11 +306,11 @@ describe('differential: behaviors no other case reaches (BEHAVIORS.tsv)', functi
     }
 
     it('statConcurrency 0 throws (async/dist/async.js:1463-1464)', async function () {
-      const { upstream, ykk } = await runBoth(constructed, { args: { options: { statConcurrency: 0 } }, wait: 'none' });
-      assert.deepStrictEqual(ykk.value, upstream.value);
+      const { upstream, port } = await runBoth(constructed, { args: { options: { statConcurrency: 0 } }, wait: 'none' });
+      assert.deepStrictEqual(port.value, upstream.value);
       for (const surface of Object.keys(SURFACES)) {
-        assert.equal(ykk.value[surface].threw.name, 'RangeError', surface);
-        assert.equal(ykk.value[surface].threw.message, 'Concurrency must not be zero', surface);
+        assert.equal(port.value[surface].threw.name, 'RangeError', surface);
+        assert.equal(port.value[surface].threw.message, 'Concurrency must not be zero', surface);
       }
     });
   });
@@ -327,11 +327,11 @@ describe('differential: behaviors no other case reaches (BEHAVIORS.tsv)', functi
     for (const format of ['json', 'zip', 'aes256']) {
       for (const [title, options, count, most] of cases) {
         it(`${format}: ${title}`, async function () {
-          const { upstream, ykk } = await runBoth(lstatsInFlight, { args: { ...args, format, options, count } });
-          assert.equal(ykk.error, null);
+          const { upstream, port } = await runBoth(lstatsInFlight, { args: { ...args, format, options, count } });
+          assert.equal(port.error, null);
           assert.equal(upstream.error, null);
-          assert.deepStrictEqual(ykk.value, upstream.value);
-          assert.deepStrictEqual(ykk.value, { most, calls: count });
+          assert.deepStrictEqual(port.value, upstream.value);
+          assert.deepStrictEqual(port.value, { most, calls: count });
           // the scenario put fs.lstat back
           assert.equal(fs.lstat.name, 'lstat');
         });
@@ -364,12 +364,12 @@ describe('differential: behaviors no other case reaches (BEHAVIORS.tsv)', functi
             // node-archiver/lib/core.js:293-294 (win32 masks with 0777)
             this.skip();
           }
-          const { upstream, ykk } = await runBoth(statModes, { args: { ...args, format, source }, random: ZIP20_HEADER });
-          assert.equal(ykk.error, null);
+          const { upstream, port } = await runBoth(statModes, { args: { ...args, format, source }, random: ZIP20_HEADER });
+          assert.equal(port.error, null);
           assert.equal(upstream.error, null);
-          assert.deepStrictEqual(modesOf(format, ykk.bytes), modesOf(format, upstream.bytes));
-          assert.deepStrictEqual(modesOf(format, ykk.bytes), expected);
-          assert.deepStrictEqual(comparedEvents(ykk), comparedEvents(upstream));
+          assert.deepStrictEqual(modesOf(format, port.bytes), modesOf(format, upstream.bytes));
+          assert.deepStrictEqual(modesOf(format, port.bytes), expected);
+          assert.deepStrictEqual(comparedEvents(port), comparedEvents(upstream));
         });
       }
     }
@@ -385,22 +385,22 @@ describe('differential: behaviors no other case reaches (BEHAVIORS.tsv)', functi
     for (const format of FORMATS) {
       for (const [title, scenario, progress, warnings] of cases) {
         it(`${format}: ${title}`, async function () {
-          const { upstream, ykk } = await runBoth(scenario, { args: { ...args, format }, random: ZIP20_HEADER });
-          assert.equal(ykk.error, null);
+          const { upstream, port } = await runBoth(scenario, { args: { ...args, format }, random: ZIP20_HEADER });
+          assert.equal(port.error, null);
           assert.equal(upstream.error, null);
-          assert.deepStrictEqual(comparedEvents(ykk), comparedEvents(upstream));
-          assert.deepStrictEqual(progressOf(ykk), progress);
-          const warned = selectEvents(ykk.events, ['warning']);
+          assert.deepStrictEqual(comparedEvents(port), comparedEvents(upstream));
+          assert.deepStrictEqual(progressOf(port), progress);
+          const warned = selectEvents(port.events, ['warning']);
           assert.equal(warned.length, warnings);
           for (const record of warned) {
             // the raw fs error, not an ArchiverError
             assert.equal(record.payload.code, 'ENOENT');
           }
-          assert.equal(selectEvents(ykk.events, ['error']).length, 0);
-          assert.equal(ykk.pointer, upstream.pointer);
+          assert.equal(selectEvents(port.events, ['error']).length, 0);
+          assert.equal(port.pointer, upstream.pointer);
           // json writes the stats of file.txt, and reading the file may change its atime (14.2, comparison rules)
           if (format !== 'json') {
-            assert.equal(ykk.bytes.equals(upstream.bytes), true, 'archive bytes');
+            assert.equal(port.bytes.equals(upstream.bytes), true, 'archive bytes');
           }
         });
       }
@@ -410,12 +410,12 @@ describe('differential: behaviors no other case reaches (BEHAVIORS.tsv)', functi
   describe('B5 bytes written to the ZipCrypto engine inside an entry (PORTING.md 7.5, ZIP-135)', function () {
     for (const [title, options] of [['stored', { store: true }], ['forceZip64', { store: true, forceZip64: true }]]) {
       it(`${title}: the local header offsets are the real positions`, async function () {
-        const { upstream, ykk } = await runBoth(writeInsideEntry, { args: { options }, random: ZIP20_HEADER });
-        assert.equal(ykk.error, null);
+        const { upstream, port } = await runBoth(writeInsideEntry, { args: { options }, random: ZIP20_HEADER });
+        assert.equal(port.error, null);
         assert.equal(upstream.error, null);
-        assert.equal(ykk.bytes.equals(upstream.bytes), true, 'archive bytes');
-        assert.deepStrictEqual(comparedEvents(ykk), comparedEvents(upstream));
-        for (const run of [upstream, ykk]) {
+        assert.equal(port.bytes.equals(upstream.bytes), true, 'archive bytes');
+        assert.deepStrictEqual(comparedEvents(port), comparedEvents(upstream));
+        for (const run of [upstream, port]) {
           // parseZip reads every local header at the offset its central header names
           const zip = parseZip(run.bytes);
           assert.deepStrictEqual(zip.prefix, Buffer.from('JUNKJUNK'));

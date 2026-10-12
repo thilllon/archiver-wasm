@@ -156,20 +156,20 @@ function assertFields(entry, payload) {
 
 // PORTING.md 14.2 (comparison rules: a stored zip is byte-equal; a deflated one is equal record by record
 // with the compressed sizes and the offsets after them masked, V1) and, for both, the extracted payload
-async function assertSameZip({ upstream, ykk }, format, store, payload) {
+async function assertSameZip({ upstream, port }, format, store, payload) {
   const encrypted = format !== 'zip';
   assert.strictEqual(upstream.error, null);
-  assert.deepStrictEqual(ykk.error, upstream.error);
-  assert.deepStrictEqual(comparedEvents(ykk, encrypted), comparedEvents(upstream, encrypted));
+  assert.deepStrictEqual(port.error, upstream.error);
+  assert.deepStrictEqual(comparedEvents(port, encrypted), comparedEvents(upstream, encrypted));
   assert.equal(upstream.pointer, upstream.bytes.length);
-  assert.equal(ykk.pointer, ykk.bytes.length);
+  assert.equal(port.pointer, port.bytes.length);
   const u = parseZip(upstream.bytes);
-  const y = parseZip(ykk.bytes);
+  const y = parseZip(port.bytes);
   const names = sources(payload).map(([name]) => name);
   assert.deepStrictEqual(u.entries.map((entry) => entry.name), names);
   assert.deepStrictEqual(y.entries.map((entry) => entry.name), names);
   if (store) {
-    assertBytes(ykk.bytes, upstream.bytes, 'archive');
+    assertBytes(port.bytes, upstream.bytes, 'archive');
   } else {
     for (let i = 0; i < names.length; i++) {
       const ue = u.entries[i];
@@ -242,13 +242,13 @@ describe('differential: payloads above MAX_CHUNK (V16)', function () {
       }
 
       it('tar', async function () {
-        const { upstream, ykk } = await runBoth(archiveOf('tar', () => ({}), payload), { endTimeout: END_TIMEOUT });
+        const { upstream, port } = await runBoth(archiveOf('tar', () => ({}), payload), { endTimeout: END_TIMEOUT });
         assert.strictEqual(upstream.error, null);
-        assert.deepStrictEqual(ykk.error, upstream.error);
-        assertBytes(ykk.bytes, upstream.bytes, 'archive');
-        assert.deepStrictEqual(selectEvents(ykk.events), selectEvents(upstream.events));
-        assert.equal(ykk.pointer, ykk.bytes.length);
-        const entries = parseTar(ykk.bytes).entries;
+        assert.deepStrictEqual(port.error, upstream.error);
+        assertBytes(port.bytes, upstream.bytes, 'archive');
+        assert.deepStrictEqual(selectEvents(port.events), selectEvents(upstream.events));
+        assert.equal(port.pointer, port.bytes.length);
+        const entries = parseTar(port.bytes).entries;
         assert.deepStrictEqual(entries.map((entry) => entry.name), sources(payload).map(([name]) => name));
         for (const entry of entries) {
           assert.equal(entry.header.size, SIZE);
@@ -259,19 +259,19 @@ describe('differential: payloads above MAX_CHUNK (V16)', function () {
       for (const [title, gzipOptions] of [['default level', undefined], ['level 1', { level: 1 }], ['level 0', { level: 0 }]]) {
         it(`tar.gz, ${title}`, async function () {
           const options = () => (gzipOptions === undefined ? {} : { gzipOptions: { ...gzipOptions } });
-          const { upstream, ykk } = await runBoth(archiveOf('tar.gz', options, payload), { endTimeout: END_TIMEOUT });
+          const { upstream, port } = await runBoth(archiveOf('tar.gz', options, payload), { endTimeout: END_TIMEOUT });
           assert.strictEqual(upstream.error, null);
-          assert.deepStrictEqual(ykk.error, upstream.error);
-          assert.deepStrictEqual(selectEvents(ykk.events), selectEvents(upstream.events));
+          assert.deepStrictEqual(port.error, upstream.error);
+          assert.deepStrictEqual(selectEvents(port.events), selectEvents(upstream.events));
           // finalize() resolves while the gzip stream still writes: the pointer is compared at the end
           assert.equal(upstream.pointerAtEnd, upstream.bytes.length);
-          assert.equal(ykk.pointerAtEnd, ykk.bytes.length);
+          assert.equal(port.pointerAtEnd, port.bytes.length);
           const u = splitGzip(upstream.bytes);
-          const y = splitGzip(ykk.bytes);
+          const y = splitGzip(port.bytes);
           assert.deepStrictEqual(y.header, u.header);
           assert.deepStrictEqual(y.trailer, u.trailer);
           assertBytes(y.payload, u.payload, 'inflated tar');
-          assertBytes(zlib.gunzipSync(ykk.bytes), u.payload, 'gunzip of the whole member');
+          assertBytes(zlib.gunzipSync(port.bytes), u.payload, 'gunzip of the whole member');
           assert.equal(y.size, y.payload.length);
           assert.equal(y.crc, crc32.buf(y.payload) >>> 0);
           const entries = parseTar(y.payload).entries;
@@ -283,12 +283,12 @@ describe('differential: payloads above MAX_CHUNK (V16)', function () {
       }
 
       it('json', async function () {
-        const { upstream, ykk } = await runBoth(archiveOf('json', () => ({}), payload), { endTimeout: END_TIMEOUT });
+        const { upstream, port } = await runBoth(archiveOf('json', () => ({}), payload), { endTimeout: END_TIMEOUT });
         assert.strictEqual(upstream.error, null);
-        assert.deepStrictEqual(ykk.error, upstream.error);
-        assert.deepStrictEqual(ykk.bytes, upstream.bytes);
-        assert.deepStrictEqual(selectEvents(ykk.events), selectEvents(upstream.events));
-        const files = JSON.parse(ykk.bytes.toString('utf8'));
+        assert.deepStrictEqual(port.error, upstream.error);
+        assert.deepStrictEqual(port.bytes, upstream.bytes);
+        assert.deepStrictEqual(selectEvents(port.events), selectEvents(upstream.events));
+        const files = JSON.parse(port.bytes.toString('utf8'));
         assert.deepStrictEqual(
           files.map((file) => [file.name, file.size, file.crc32]),
           sources(payload).map(([name]) => [name, SIZE, crc32.buf(payload) >>> 0])
@@ -297,16 +297,16 @@ describe('differential: payloads above MAX_CHUNK (V16)', function () {
 
       for (const [title, chunks] of [['one chunk', [payload]], ['three chunks', cut(payload)]]) {
         it(`AesHmacEtmStream, ${title}`, async function () {
-          const { upstream, ykk } = await runBoth(
+          const { upstream, port } = await runBoth(
             transformOf((impl) => new impl.AesHmacEtmStream({ key: Buffer.from(PASSWORD), salt: Buffer.from(SALT) }), chunks),
             { endTimeout: END_TIMEOUT }
           );
           assert.strictEqual(upstream.error, null);
-          assert.deepStrictEqual(ykk.error, upstream.error);
-          assertBytes(ykk.bytes, upstream.bytes, 'encrypted');
-          assert.equal(ykk.value, upstream.value);
-          assert.equal(ykk.value, SIZE + AES_OVERHEAD);
-          const decrypted = decryptAes(ykk.bytes, PASSWORD);
+          assert.deepStrictEqual(port.error, upstream.error);
+          assertBytes(port.bytes, upstream.bytes, 'encrypted');
+          assert.equal(port.value, upstream.value);
+          assert.equal(port.value, SIZE + AES_OVERHEAD);
+          const decrypted = decryptAes(port.bytes, PASSWORD);
           assert.deepStrictEqual([decrypted.verifierOk, decrypted.macOk], [true, true]);
           assertBytes(decrypted.data, payload, 'decrypted');
         });
@@ -314,11 +314,11 @@ describe('differential: payloads above MAX_CHUNK (V16)', function () {
         it(`CryptoStream, ${title}`, async function () {
           const crc = Buffer.alloc(4);
           crc.writeUInt32BE(crc32.buf(payload) >>> 0);
-          const { upstream, ykk } = await runBoth(
+          const { upstream, port } = await runBoth(
             transformOf(
               (impl, ctx) =>
                 new impl.CryptoStream(
-                  impl.name === 'ykk'
+                  impl.name === 'port'
                     ? { key: Buffer.from(PASSWORD), crc, header: Buffer.from(ctx.zip20Header) }
                     : { key: Buffer.from(PASSWORD), crc }
                 ),
@@ -327,10 +327,10 @@ describe('differential: payloads above MAX_CHUNK (V16)', function () {
             { random: ZIP20_HEADER, endTimeout: END_TIMEOUT }
           );
           assert.strictEqual(upstream.error, null);
-          assert.deepStrictEqual(ykk.error, upstream.error);
-          assertBytes(ykk.bytes, upstream.bytes, 'encrypted');
-          assert.equal(ykk.bytes.length, SIZE + ZIP20_OVERHEAD);
-          assertBytes((await decryptZip20(ykk.bytes, PASSWORD)).data, payload, 'decrypted');
+          assert.deepStrictEqual(port.error, upstream.error);
+          assertBytes(port.bytes, upstream.bytes, 'encrypted');
+          assert.equal(port.bytes.length, SIZE + ZIP20_OVERHEAD);
+          assertBytes((await decryptZip20(port.bytes, PASSWORD)).data, payload, 'decrypted');
         });
 
         it(`DecryptoStream, ${title}`, async function () {
@@ -338,30 +338,30 @@ describe('differential: payloads above MAX_CHUNK (V16)', function () {
           const cipher = new CryptoCipher(Buffer.from(PASSWORD));
           const encrypted = Buffer.concat([cipher.encrypt(ZIP20_HEADER), cipher.encrypt(payload)]);
           const pieces = chunks.length === 1 ? [encrypted] : cut(encrypted);
-          const { upstream, ykk } = await runBoth(
+          const { upstream, port } = await runBoth(
             transformOf((impl) => new impl.DecryptoStream({ key: Buffer.from(PASSWORD) }), pieces),
             { endTimeout: END_TIMEOUT }
           );
           assert.strictEqual(upstream.error, null);
-          assert.deepStrictEqual(ykk.error, upstream.error);
-          assertBytes(ykk.bytes, upstream.bytes, 'decrypted against upstream');
-          assertBytes(ykk.bytes, payload, 'decrypted');
-          assert.equal(ykk.value, upstream.value);
-          assert.equal(ykk.value, SIZE);
+          assert.deepStrictEqual(port.error, upstream.error);
+          assertBytes(port.bytes, upstream.bytes, 'decrypted against upstream');
+          assertBytes(port.bytes, payload, 'decrypted');
+          assert.equal(port.value, upstream.value);
+          assert.equal(port.value, SIZE);
         });
       }
 
       it('CryptoCipher: encrypt() and decrypt() of one Buffer', async function () {
         const upstream = await load('upstream');
-        const ykk = await load('ykk');
+        const port = await load('port');
         const key = Buffer.from(PASSWORD);
         const expected = new upstream.CryptoCipher(key).encrypt(payload);
-        const encrypted = new ykk.CryptoCipher(key).encrypt(payload);
+        const encrypted = new port.CryptoCipher(key).encrypt(payload);
         assertBytes(encrypted, expected, 'encrypt()');
-        assertBytes(new ykk.CryptoCipher(key).decrypt(expected), payload, 'decrypt()');
+        assertBytes(new port.CryptoCipher(key).decrypt(expected), payload, 'decrypt()');
         assertBytes(new upstream.CryptoCipher(key).decrypt(encrypted), payload, 'decrypt() of upstream');
         // the key state runs on over the slices and over the calls
-        const cipher = new ykk.CryptoCipher(key);
+        const cipher = new port.CryptoCipher(key);
         const [first, second, third] = cut(payload);
         assertBytes(
           Buffer.concat([cipher.encrypt(first), cipher.encrypt(second), cipher.encrypt(third)]),

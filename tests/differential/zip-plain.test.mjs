@@ -23,7 +23,7 @@ let root;
 
 // PORTING.md 14.2 (determinism: file modes are set by chmod in the test, times by lutimes)
 function makeTree() {
-  const tree = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'ykk-diff-zip-')));
+  const tree = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'archiver-wasm-diff-zip-')));
   const write = (rel, data, mode) => {
     const target = path.join(tree, rel);
     fs.mkdirSync(path.dirname(target), { recursive: true });
@@ -94,7 +94,7 @@ function zip(options, add) {
   };
 }
 
-// PORTING.md 14.2 (Z12: the class of the engine a ZipArchive runs on; ykk does not export ZipStream by name)
+// PORTING.md 14.2 (Z12: the class of the engine a ZipArchive runs on; port does not export ZipStream by name)
 function zipStreamClass(impl) {
   const archive = new impl.ZipArchive();
   const ZipStream = archive._module.engine.constructor;
@@ -136,10 +136,10 @@ async function assertSameEntry(u, y) {
 }
 
 // PORTING.md 14.2 (comparison rules, deflated zip, class D: entry order, entries, end records)
-async function assertSameArchive(upstream, ykk) {
-  assert.deepStrictEqual(ykk.error, upstream.error);
+async function assertSameArchive(upstream, port) {
+  assert.deepStrictEqual(port.error, upstream.error);
   const u = parseZip(upstream.bytes);
-  const y = parseZip(ykk.bytes);
+  const y = parseZip(port.bytes);
   assert.deepStrictEqual(y.entries.map((entry) => entry.name), u.entries.map((entry) => entry.name));
   for (let i = 0; i < u.entries.length; i++) {
     await assertSameEntry(u.entries[i], y.entries[i]);
@@ -152,29 +152,29 @@ async function assertSameArchive(upstream, ykk) {
 }
 
 // PORTING.md 14.2 (comparison rules, deflated zip, class D; events: the exact sequence)
-async function assertSameZip(upstream, ykk) {
-  const zips = await assertSameArchive(upstream, ykk);
-  assert.deepStrictEqual(selectEvents(ykk.events), selectEvents(upstream.events));
+async function assertSameZip(upstream, port) {
+  const zips = await assertSameArchive(upstream, port);
+  assert.deepStrictEqual(selectEvents(port.events), selectEvents(upstream.events));
   return zips;
 }
 
 // PORTING.md 14.2 (comparison rules, stored zip: whole-archive byte equality, events, pointer)
-function assertSameBytes(upstream, ykk) {
-  assert.deepStrictEqual(ykk.error, upstream.error);
-  assert.deepStrictEqual(ykk.bytes, upstream.bytes);
-  assert.deepStrictEqual(selectEvents(ykk.events), selectEvents(upstream.events));
-  assert.equal(ykk.pointer, upstream.pointer);
-  if (ykk.pointer !== null) {
-    assert.equal(ykk.pointer, ykk.bytes.length);
+function assertSameBytes(upstream, port) {
+  assert.deepStrictEqual(port.error, upstream.error);
+  assert.deepStrictEqual(port.bytes, upstream.bytes);
+  assert.deepStrictEqual(selectEvents(port.events), selectEvents(upstream.events));
+  assert.equal(port.pointer, upstream.pointer);
+  if (port.pointer !== null) {
+    assert.equal(port.pointer, port.bytes.length);
   }
-  return { u: parseZip(upstream.bytes), y: parseZip(ykk.bytes) };
+  return { u: parseZip(upstream.bytes), y: parseZip(port.bytes) };
 }
 
 // PORTING.md 14.2 (order class N: per entry, keyed by name, offsets masked; multisets of names and events)
-async function assertSameEntries(upstream, ykk) {
-  assert.deepStrictEqual(ykk.error, upstream.error);
+async function assertSameEntries(upstream, port) {
+  assert.deepStrictEqual(port.error, upstream.error);
   const u = parseZip(upstream.bytes);
-  const y = parseZip(ykk.bytes);
+  const y = parseZip(port.bytes);
   const names = (zip) => zip.entries.map((entry) => entry.name).sort();
   assert.deepStrictEqual(names(y), names(u));
   assert.equal(new Set(names(u)).size, u.entries.length);
@@ -186,11 +186,11 @@ async function assertSameEntries(upstream, ykk) {
   assertEndRecords(u);
   assertEndRecords(y);
   const unordered = (run) => sortEvents(selectEvents(run.events, ['entry', 'warning', 'error']));
-  assert.deepStrictEqual(unordered(ykk), unordered(upstream));
+  assert.deepStrictEqual(unordered(port), unordered(upstream));
   const progress = (run) => selectEvents(run.events, ['progress']).map((record) => record.payload);
   const processed = (run) => progress(run).map((payload) => payload.entries.processed).sort((a, b) => a - b);
-  assert.deepStrictEqual(processed(ykk), processed(upstream));
-  assert.deepStrictEqual(progress(ykk).at(-1), progress(upstream).at(-1));
+  assert.deepStrictEqual(processed(port), processed(upstream));
+  assert.deepStrictEqual(progress(port).at(-1), progress(upstream).at(-1));
   return { u, y };
 }
 
@@ -220,8 +220,8 @@ describe('differential: zip (plain)', function () {
     };
 
     it('default method (V1)', async function () {
-      const { upstream, ykk } = await runBoth(zip(() => ({}), add));
-      const zips = await assertSameZip(upstream, ykk);
+      const { upstream, port } = await runBoth(zip(() => ({}), add));
+      const zips = await assertSameZip(upstream, port);
       for (const parsed of both(zips)) {
         assert.deepStrictEqual(parsed.entries.map((entry) => entry.central.method), [8, 8, 8, 8]);
         assert.deepStrictEqual(parsed.entries.map((entry) => entry.central.size), [4000, 23, 4000, 4000]);
@@ -229,8 +229,8 @@ describe('differential: zip (plain)', function () {
     });
 
     it('stored', async function () {
-      const { upstream, ykk } = await runBoth(zip(() => ({ store: true }), add));
-      assertSameBytes(upstream, ykk);
+      const { upstream, port } = await runBoth(zip(() => ({ store: true }), add));
+      assertSameBytes(upstream, port);
     });
   });
 
@@ -242,8 +242,8 @@ describe('differential: zip (plain)', function () {
     };
 
     it('default method (P14)', async function () {
-      const { upstream, ykk } = await runBoth(zip(() => ({}), add));
-      const zips = await assertSameZip(upstream, ykk);
+      const { upstream, port } = await runBoth(zip(() => ({}), add));
+      const zips = await assertSameZip(upstream, port);
       for (const parsed of both(zips)) {
         const empty = parsed.entries[0];
         assert.equal(empty.local.versionNeeded, 20);
@@ -257,8 +257,8 @@ describe('differential: zip (plain)', function () {
     });
 
     it('stored', async function () {
-      const { upstream, ykk } = await runBoth(zip(() => ({ store: true }), add));
-      const zips = assertSameBytes(upstream, ykk);
+      const { upstream, port } = await runBoth(zip(() => ({ store: true }), add));
+      const zips = assertSameBytes(upstream, port);
       assert.equal(zips.y.entries[0].local.versionNeeded, 10);
       assert.equal(zips.y.entries[0].local.flags, 0);
       assert.equal(zips.y.entries[0].descriptor, null);
@@ -267,7 +267,7 @@ describe('differential: zip (plain)', function () {
 
   describe('Z3 directories', function () {
     it('append(null, { name: "d/" }) and type "directory"', async function () {
-      const { upstream, ykk } = await runBoth(
+      const { upstream, port } = await runBoth(
         zip(() => ({}), (archive) => {
           archive.append(null, { name: 'd/', date: DATE });
           archive.append(null, { name: 'typed', type: 'directory', date: DATE });
@@ -275,28 +275,28 @@ describe('differential: zip (plain)', function () {
           archive.append(TEXT, { name: 'd/file.txt', date: DATE, store: true });
         })
       );
-      const zips = assertSameBytes(upstream, ykk);
+      const zips = assertSameBytes(upstream, port);
       assert.deepStrictEqual(zips.y.entries.map((entry) => entry.name), ['d/', 'typed/', 'mode/', 'd/file.txt']);
       assert.equal(zips.y.entries[0].central.externalAttributes, ((0o40755 << 16) | 0x10) >>> 0);
     });
 
     it('file() on a directory', async function () {
-      const { upstream, ykk } = await runBoth(
+      const { upstream, port } = await runBoth(
         zip(() => ({}), (archive) => {
           archive.file(fixture('dir'), { name: 'from-file', date: DATE });
         })
       );
-      const zips = assertSameBytes(upstream, ykk);
+      const zips = assertSameBytes(upstream, port);
       assert.deepStrictEqual(zips.y.entries.map((entry) => entry.name), ['from-file/']);
     });
 
     it('one directory()', async function () {
-      const { upstream, ykk } = await runBoth(
+      const { upstream, port } = await runBoth(
         zip(() => ({}), (archive) => {
           archive.directory(fixture('dir'), 'walk', { date: DATE });
         })
       );
-      const zips = await assertSameZip(upstream, ykk);
+      const zips = await assertSameZip(upstream, port);
       assert.deepStrictEqual(
         zips.y.entries.map((entry) => entry.name).sort(),
         [
@@ -307,7 +307,7 @@ describe('differential: zip (plain)', function () {
     });
 
     it('one directory() with destpath false and a data function', async function () {
-      const { upstream, ykk } = await runBoth(
+      const { upstream, port } = await runBoth(
         zip(() => ({ store: true }), (archive) => {
           archive.directory(fixture('dir'), false, (data) => {
             if (data.name === 'sub/ignore.txt') {
@@ -319,14 +319,14 @@ describe('differential: zip (plain)', function () {
           });
         })
       );
-      const zips = assertSameBytes(upstream, ykk);
+      const zips = assertSameBytes(upstream, port);
       assert.ok(!zips.y.entries.some((entry) => entry.name === 'sub/ignore.txt'));
     });
   });
 
   describe('Z4 symlinks', function () {
     it('symlink()', async function () {
-      const { upstream, ykk } = await runBoth(
+      const { upstream, port } = await runBoth(
         zip(() => ({}), (archive) => {
           archive.append(TEXT, { name: 'target.txt', date: DATE, store: true });
           archive.symlink('link.txt', 'target.txt');
@@ -334,7 +334,7 @@ describe('differential: zip (plain)', function () {
         }),
         { clock: CLOCK }
       );
-      const zips = assertSameBytes(upstream, ykk);
+      const zips = assertSameBytes(upstream, port);
       const link = zips.y.entries[1];
       assert.deepStrictEqual(link.payload, Buffer.from('target.txt'));
       assert.equal(link.central.externalAttributes >>> 16, 0o120000);
@@ -343,12 +343,12 @@ describe('differential: zip (plain)', function () {
     });
 
     it('from disk', async function () {
-      const { upstream, ykk } = await runBoth(
+      const { upstream, port } = await runBoth(
         zip(() => ({ store: true }), (archive) => {
           archive.directory(fixture('links'), 'links', { date: DATE });
         })
       );
-      const zips = assertSameBytes(upstream, ykk);
+      const zips = assertSameBytes(upstream, port);
       const byName = new Map(zips.y.entries.map((entry) => [entry.name, entry]));
       assert.deepStrictEqual([...byName.keys()].sort(), ['links/dirlink', 'links/link.txt', 'links/target.txt']);
       assert.deepStrictEqual(byName.get('links/link.txt').payload, Buffer.from('target.txt'));
@@ -369,8 +369,8 @@ describe('differential: zip (plain)', function () {
     };
 
     it('prefix, backslash names, "c:c:/x", namePrependSlash per entry', async function () {
-      const { upstream, ykk } = await runBoth(zip(() => ({ store: true }), add));
-      const zips = assertSameBytes(upstream, ykk);
+      const { upstream, port } = await runBoth(zip(() => ({ store: true }), add));
+      const zips = assertSameBytes(upstream, port);
       assert.deepStrictEqual(
         zips.y.entries.map((entry) => entry.name),
         ['pre/fix/a.txt', 'back/slash/b.txt', 'x', 'up/../x.txt', 'abs.txt', './dot/./d.txt', '/slash.txt']
@@ -378,8 +378,8 @@ describe('differential: zip (plain)', function () {
     });
 
     it('namePrependSlash per archive', async function () {
-      const { upstream, ykk } = await runBoth(zip(() => ({ store: true, namePrependSlash: true }), add));
-      const zips = assertSameBytes(upstream, ykk);
+      const { upstream, port } = await runBoth(zip(() => ({ store: true, namePrependSlash: true }), add));
+      const zips = assertSameBytes(upstream, port);
       assert.deepStrictEqual(
         zips.y.entries.map((entry) => entry.name),
         ['/pre/fix/a.txt', '/back/slash/b.txt', '/x', '/up/../x.txt', '/abs.txt', '/./dot/./d.txt', '/slash.txt']
@@ -387,8 +387,8 @@ describe('differential: zip (plain)', function () {
     });
 
     it('default method', async function () {
-      const { upstream, ykk } = await runBoth(zip(() => ({}), add));
-      await assertSameZip(upstream, ykk);
+      const { upstream, port } = await runBoth(zip(() => ({}), add));
+      await assertSameZip(upstream, port);
     });
   });
 
@@ -402,16 +402,16 @@ describe('differential: zip (plain)', function () {
 
     for (const comment of ['an ASCII archive comment', 'archive ü 日本語']) {
       it(`archive comment ${JSON.stringify(comment)}`, async function () {
-        const { upstream, ykk } = await runBoth(async (impl, ctx) => {
+        const { upstream, port } = await runBoth(async (impl, ctx) => {
           const archive = ctx.create('zip', { store: true, comment });
           add(archive);
           await archive.finalize();
           return archive._module.engine.getBytesWritten();
         });
-        const zips = assertSameBytes(upstream, ykk);
-        // upstream counts the archive comment in UTF-16 units (ZIP-101), ykk in bytes (V5)
+        const zips = assertSameBytes(upstream, port);
+        // upstream counts the archive comment in UTF-16 units (ZIP-101), port in bytes (V5)
         assert.equal(upstream.value, upstream.bytes.length - (Buffer.byteLength(comment) - comment.length));
-        assert.equal(ykk.value, ykk.bytes.length);
+        assert.equal(port.value, port.bytes.length);
         assert.deepStrictEqual(zips.y.end.comment, Buffer.from(comment));
         assert.equal(zips.y.end.commentLength, Buffer.byteLength(comment));
         assert.deepStrictEqual(
@@ -422,14 +422,14 @@ describe('differential: zip (plain)', function () {
     }
 
     it('default method', async function () {
-      const { upstream, ykk } = await runBoth(zip(() => ({ comment: 'archive ü' }), add));
-      await assertSameZip(upstream, ykk);
+      const { upstream, port } = await runBoth(zip(() => ({ comment: 'archive ü' }), add));
+      await assertSameZip(upstream, port);
     });
   });
 
   describe('Z7 mode', function () {
     it('0, null, 0644, 0777, absent', async function () {
-      const { upstream, ykk } = await runBoth(
+      const { upstream, port } = await runBoth(
         zip(() => ({ store: true }), (archive) => {
           archive.append(TEXT, { name: 'mode-0.txt', date: DATE, mode: 0 });
           archive.append(TEXT, { name: 'mode-null.txt', date: DATE, mode: null });
@@ -440,7 +440,7 @@ describe('differential: zip (plain)', function () {
           archive.append(null, { name: 'dir-mode-0/', date: DATE, mode: 0 });
         })
       );
-      const zips = assertSameBytes(upstream, ykk);
+      const zips = assertSameBytes(upstream, port);
       assert.deepStrictEqual(
         zips.y.entries.map((entry) => entry.central.externalAttributes >>> 16),
         [0o100000, 0o100644, 0o100644, 0o100777, 0o100644, 0o107777, 0o40000]
@@ -478,8 +478,8 @@ describe('differential: zip (plain)', function () {
 
     for (const { title, options, methods, shrinks } of cases) {
       it(title, async function () {
-        const { upstream, ykk } = await runBoth(zip(options, add));
-        const zips = methods.includes(8) ? await assertSameZip(upstream, ykk) : assertSameBytes(upstream, ykk);
+        const { upstream, port } = await runBoth(zip(options, add));
+        const zips = methods.includes(8) ? await assertSameZip(upstream, port) : assertSameBytes(upstream, port);
         for (const parsed of both(zips)) {
           assert.deepStrictEqual(parsed.entries.map((entry) => entry.central.method), methods);
           for (const entry of parsed.entries) {
@@ -496,13 +496,13 @@ describe('differential: zip (plain)', function () {
 
   describe('Z9 forceZip64 (P15)', function () {
     it('stored', async function () {
-      const { upstream, ykk } = await runBoth(
+      const { upstream, port } = await runBoth(
         zip(() => ({ forceZip64: true, store: true }), (archive) => {
           archive.append(TEXT, { name: 'a.txt', date: DATE });
           archive.append(streamOf([TEXT]), { name: 'stream.txt', date: DATE });
         })
       );
-      const zips = assertSameBytes(upstream, ykk);
+      const zips = assertSameBytes(upstream, port);
       const parsed = zips.y;
       assert.notEqual(parsed.zip64End, null);
       assert.notEqual(parsed.zip64Locator, null);
@@ -520,12 +520,12 @@ describe('differential: zip (plain)', function () {
     });
 
     it('default method', async function () {
-      const { upstream, ykk } = await runBoth(
+      const { upstream, port } = await runBoth(
         zip(() => ({ forceZip64: true }), (archive) => {
           archive.append(BIG, { name: 'a.txt', date: DATE });
         })
       );
-      const zips = await assertSameZip(upstream, ykk);
+      const zips = await assertSameZip(upstream, port);
       for (const parsed of both(zips)) {
         assert.notEqual(parsed.zip64End, null);
         assert.equal(parsed.entries[0].local.extraLength, 0);
@@ -569,8 +569,8 @@ describe('differential: zip (plain)', function () {
     });
 
     it('default options: UTC fields', async function () {
-      const { upstream, ykk } = await runBoth(zip(() => ({ store: true }), add));
-      const zips = assertSameBytes(upstream, ykk);
+      const { upstream, port } = await runBoth(zip(() => ({ store: true }), add));
+      const zips = assertSameBytes(upstream, port);
       // 1980-1-1 00:00:00 below 1980, 2043-12-31 23:59:58 from 2044 on, 0 for an Invalid Date (ZIP-086)
       assert.deepStrictEqual(times(zips.y), [
         2162688,
@@ -588,8 +588,8 @@ describe('differential: zip (plain)', function () {
     });
 
     it('forceLocalTime: local fields', async function () {
-      const { upstream, ykk } = await runBoth(zip(() => ({ store: true, forceLocalTime: true }), add));
-      const zips = assertSameBytes(upstream, ykk);
+      const { upstream, port } = await runBoth(zip(() => ({ store: true, forceLocalTime: true }), add));
+      const zips = assertSameBytes(upstream, port);
       assert.deepStrictEqual(times(zips.y), [
         ((1980 - 1980) << 25) | (1 << 21) | (1 << 16) | (8 << 11) | (59 << 5) | 29,
         ((1980 - 1980) << 25) | (1 << 21) | (1 << 16) | (9 << 11) | (0 << 5) | 0,
@@ -609,10 +609,10 @@ describe('differential: zip (plain)', function () {
       const plain = await runBoth(zip(() => ({ store: true }), add));
       const forceUTC = await runBoth(zip(() => ({ store: true, forceUTC: true }), add));
       const notUTC = await runBoth(zip(() => ({ store: true, forceUTC: false }), add));
-      assertSameBytes(forceUTC.upstream, forceUTC.ykk);
-      assertSameBytes(notUTC.upstream, notUTC.ykk);
-      assert.deepStrictEqual(forceUTC.ykk.bytes, plain.ykk.bytes);
-      assert.deepStrictEqual(notUTC.ykk.bytes, plain.ykk.bytes);
+      assertSameBytes(forceUTC.upstream, forceUTC.port);
+      assertSameBytes(notUTC.upstream, notUTC.port);
+      assert.deepStrictEqual(forceUTC.port.bytes, plain.port.bytes);
+      assert.deepStrictEqual(notUTC.port.bytes, plain.port.bytes);
       assert.deepStrictEqual(forceUTC.upstream.bytes, plain.upstream.bytes);
     });
 
@@ -625,9 +625,9 @@ describe('differential: zip (plain)', function () {
       const asNumber = await runBoth(scenario(numeric), { clock: CLOCK });
       const asNow = await runBoth(scenario(new Date(CLOCK.getTime())), { clock: CLOCK });
       const asDate = await runBoth(scenario(new Date(numeric)), { clock: CLOCK });
-      const zips = assertSameBytes(asNumber.upstream, asNumber.ykk);
-      assert.deepStrictEqual(asNumber.ykk.bytes, asNow.ykk.bytes);
-      assert.notDeepStrictEqual(asNumber.ykk.bytes, asDate.ykk.bytes);
+      const zips = assertSameBytes(asNumber.upstream, asNumber.port);
+      assert.deepStrictEqual(asNumber.port.bytes, asNow.port.bytes);
+      assert.notDeepStrictEqual(asNumber.port.bytes, asDate.port.bytes);
       assert.equal(
         zips.y.entries[0].central.dosTime,
         ((2021 - 1980) << 25) | (7 << 21) | (4 << 16) | (9 << 11) | (8 << 5) | 3
@@ -638,7 +638,7 @@ describe('differential: zip (plain)', function () {
   describe('Z11 a source stream that errors midway (P16)', function () {
     for (const store of [true, false]) {
       it(store ? 'stored' : 'default method', async function () {
-        const { upstream, ykk } = await runBoth(async (impl, ctx) => {
+        const { upstream, port } = await runBoth(async (impl, ctx) => {
           const ZipStream = zipStreamClass(impl);
           const engine = ctx.track(new ZipStream({ store }));
           const ended = once(engine, 'end');
@@ -655,8 +655,8 @@ describe('differential: zip (plain)', function () {
           return reported;
         });
         assert.deepStrictEqual(upstream.value, { message: 'source failed', entry: true });
-        assert.deepStrictEqual(ykk.value, upstream.value);
-        const zips = store ? assertSameBytes(upstream, ykk) : await assertSameZip(upstream, ykk);
+        assert.deepStrictEqual(port.value, upstream.value);
+        const zips = store ? assertSameBytes(upstream, port) : await assertSameZip(upstream, port);
         for (const parsed of both(zips)) {
           assert.deepStrictEqual(parsed.entries.map((entry) => entry.name), ['partial.txt', 'after.txt']);
           assert.equal(parsed.entries[0].central.size, 3000);
@@ -669,7 +669,7 @@ describe('differential: zip (plain)', function () {
   describe('Z12 ZipStream used directly (ZIP-135)', function () {
     for (const store of [true, false]) {
       it(store ? 'stored' : 'default method', async function () {
-        const { upstream, ykk } = await runBoth(async (impl, ctx) => {
+        const { upstream, port } = await runBoth(async (impl, ctx) => {
           const ZipStream = zipStreamClass(impl);
           const engine = ctx.track(new ZipStream({ store }));
           const ended = once(engine, 'end');
@@ -680,7 +680,7 @@ describe('differential: zip (plain)', function () {
           });
           await ended;
         });
-        const zips = store ? assertSameBytes(upstream, ykk) : await assertSameZip(upstream, ykk);
+        const zips = store ? assertSameBytes(upstream, port) : await assertSameZip(upstream, port);
         for (const parsed of both(zips)) {
           assert.deepStrictEqual(parsed.prefix, Buffer.from('PREFIX'));
           assert.equal(parsed.entries[0].central.localHeaderOffset, 6);
@@ -694,7 +694,7 @@ describe('differential: zip (plain)', function () {
 
   describe('Z13 several fs sources (class N, GLOB-FS-068)', function () {
     it('several file() calls with the default statConcurrency', async function () {
-      const { upstream, ykk } = await runBoth(
+      const { upstream, port } = await runBoth(
         zip(() => ({}), (archive) => {
           archive.file(fixture('file.txt'), { name: 'file.txt', date: DATE });
           archive.file(fixture('exec.sh'), { name: 'exec.sh', date: DATE });
@@ -705,38 +705,38 @@ describe('differential: zip (plain)', function () {
           archive.file(fixture('links/link.txt'), { name: 'link.txt', date: DATE });
         })
       );
-      const zips = await assertSameEntries(upstream, ykk);
+      const zips = await assertSameEntries(upstream, port);
       assert.equal(zips.y.entries.length, 7);
     });
 
     it('file() plus directory()', async function () {
-      const { upstream, ykk } = await runBoth(
+      const { upstream, port } = await runBoth(
         zip(() => ({}), (archive) => {
           archive.file(fixture('file.txt'), { name: 'file.txt', date: DATE });
           archive.directory(fixture('dir'), 'dir', { date: DATE });
           archive.file(fixture('exec.sh'), { name: 'exec.sh', date: DATE });
         })
       );
-      const zips = await assertSameEntries(upstream, ykk);
+      const zips = await assertSameEntries(upstream, port);
       assert.equal(zips.y.entries.length, 11);
     });
 
     it('three directory() walks', async function () {
-      const { upstream, ykk } = await runBoth(
+      const { upstream, port } = await runBoth(
         zip(() => ({}), (archive) => {
           archive.directory(fixture('dir'), 'one', { date: DATE });
           archive.directory(fixture('dir'), 'Win\\DS\\', { date: DATE });
           archive.directory(fixture('links'), 'three', { date: DATE });
         })
       );
-      const zips = await assertSameEntries(upstream, ykk);
+      const zips = await assertSameEntries(upstream, port);
       assert.equal(zips.y.entries.length, 9 + 9 + 3);
     });
   });
 
   describe('Z14 statConcurrency 1', function () {
     it('file() calls including missing files (warnings)', async function () {
-      const { upstream, ykk } = await runBoth(
+      const { upstream, port } = await runBoth(
         zip(() => ({ statConcurrency: 1 }), (archive) => {
           archive.file(fixture('file.txt'), { name: 'file.txt', date: DATE });
           archive.file(fixture('missing-1.txt'), { name: 'missing-1.txt', date: DATE });
@@ -746,20 +746,20 @@ describe('differential: zip (plain)', function () {
           archive.file(fixture('dir/b.txt'), { name: 'b.txt', date: DATE });
         })
       );
-      const zips = await assertSameArchive(upstream, ykk);
+      const zips = await assertSameArchive(upstream, port);
       assert.deepStrictEqual(zips.y.entries.map((entry) => entry.name), ['file.txt', 'exec.sh', 'a.txt', 'b.txt']);
       // upstream orders neither 'warning' nor entries.total / fs.totalBytes against 'entry' (stat queue)
       for (const kind of ['entry', 'warning', 'error']) {
-        assert.deepStrictEqual(selectEvents(ykk.events, [kind]), selectEvents(upstream.events, [kind]));
+        assert.deepStrictEqual(selectEvents(port.events, [kind]), selectEvents(upstream.events, [kind]));
       }
       const processed = (run) =>
         selectEvents(run.events, ['progress']).map((record) => [
           record.payload.entries.processed,
           record.payload.fs.processedBytes,
         ]);
-      assert.deepStrictEqual(processed(ykk), processed(upstream));
-      assert.deepStrictEqual(processed(ykk), [[1, 19], [2, 29], [3, 4029], [4, 4030]]);
-      const warnings = selectEvents(ykk.events, ['warning']);
+      assert.deepStrictEqual(processed(port), processed(upstream));
+      assert.deepStrictEqual(processed(port), [[1, 19], [2, 29], [3, 4029], [4, 4030]]);
+      const warnings = selectEvents(port.events, ['warning']);
       assert.deepStrictEqual(warnings.map((record) => record.payload.code), ['ENOENT', 'ENOENT']);
       assert.deepStrictEqual(
         zips.y.entries.map((entry) => entry.central.externalAttributes >>> 16),
@@ -770,7 +770,7 @@ describe('differential: zip (plain)', function () {
 
   describe('Z15 one glob()', function () {
     it('cwd, ignore and dot', async function () {
-      const { upstream, ykk } = await runBoth(
+      const { upstream, port } = await runBoth(
         zip(() => ({}), (archive) => {
           archive.glob(
             '**/*',
@@ -779,7 +779,7 @@ describe('differential: zip (plain)', function () {
           );
         })
       );
-      const zips = await assertSameZip(upstream, ykk);
+      const zips = await assertSameZip(upstream, port);
       assert.deepStrictEqual(
         zips.y.entries.map((entry) => entry.name).sort(),
         ['globbed/.hidden', 'globbed/a.txt', 'globbed/b.txt', 'globbed/empty.txt', 'globbed/sub/', 'globbed/sub/c.txt']
@@ -787,12 +787,12 @@ describe('differential: zip (plain)', function () {
     });
 
     it('cwd without dot', async function () {
-      const { upstream, ykk } = await runBoth(
+      const { upstream, port } = await runBoth(
         zip(() => ({ store: true }), (archive) => {
           archive.glob('**/*', { cwd: fixture('dir') }, { date: DATE });
         })
       );
-      const zips = assertSameBytes(upstream, ykk);
+      const zips = assertSameBytes(upstream, port);
       assert.deepStrictEqual(
         zips.y.entries.map((entry) => entry.name).sort(),
         ['a.txt', 'b.txt', 'empty.txt', 'sub/', 'sub/c.txt', 'sub/deep/', 'sub/deep/d.txt', 'sub/ignore.txt']
