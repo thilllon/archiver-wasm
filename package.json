@@ -53,6 +53,7 @@
   },
   "devDependencies": {
     "@arethetypeswrong/core": "0.18.5",
+    "@types/mocha": "10.0.10",
     "@types/node": "18.19.130",
     "aes-js": "3.1.2",
     "archiver": "8.0.0",
@@ -95,7 +96,7 @@
     "build": "npm run build:ts && npm run build:wasm && node scripts/check-wasm-types.mjs",
     "typecheck": "tsc --noEmit",
     "test:rust": "cargo test --workspace && cargo test --workspace --release",
-    "test:unit": "mocha --no-config -n import=tsx \"tests/unit/*.test.ts\"",
+    "test:unit": "mocha --no-config -n import=tsx \"src/**/*.test.ts\"",
     "test:upstream:archiver": "cd tests/upstream/node-archiver && rm -f test/fixtures/directory/subdir/level0link.txt test/fixtures/directory/subdir/subsublink && mocha --reporter dot",
     "test:upstream:encrypted": "cd tests/upstream/archiver-zip-encrypted && mocha --require ../alias-archiver.cjs",
     "test:oracle": "node scripts/verify-oracle-versions.mjs",
