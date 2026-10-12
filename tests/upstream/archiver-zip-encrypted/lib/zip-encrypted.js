@@ -1,1 +1,1 @@
-module.exports = require('../../../../cjs/index.cjs').ZipEncrypted;
+module.exports = require('../../../../dist/index.cjs').ZipEncrypted;

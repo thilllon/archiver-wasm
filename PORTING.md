@@ -181,7 +181,9 @@ phases after the loop need their own rule for who edits what and who reviews it.
    is one compilation unit, so all `rs-*` core units are fixed together and the
    `depends_on` column of `PORTMAP.tsv` gives no order inside it); (b) `ykk-wasm`;
    (c) `scripts/build-wasm.sh` and `scripts/check-wasm-types.mjs`; (d) `tsc --noEmit`;
-   (e) `tsup`. One fixer per stage. That fixer may edit any file of the stage. Stages (a)
+   (e) `tsdown`, after which `scripts/build-wasm.sh` is run again, because tsdown cleans
+   `dist/` and the wasm output lives in `dist/wasm/` (15.4). One fixer per stage. That
+   fixer may edit any file of the stage. Stages (a)
    and (b) are closed with `cargo fmt --check` and `cargo clippy --workspace -- -D warnings`
    clean. A lint that fires on an upstream spelling is settled by RS-40 (the list of 15.1),
    never by rewriting the expression or by an attribute on the item.
@@ -219,7 +221,7 @@ after every unit exists (M1).
    `rust-toolchain.toml`, the exact `wasm-pack` version in 12.3, the `wasm-bindgen` pin of
    12.1 (if that release does not build with the pinned Rust, the gate raises the pin to
    the newest release that does and records it in 12.1), whether `wasm-opt` runs (15.2),
-   and the exact versions of `typescript`, `tsup`, `tsx` and `@types/node` in
+   and the exact versions of `typescript`, `tsdown`, `tsx` and `@types/node` in
    `package.json`. `Cargo.lock` and `package-lock.json` are committed.
 5. If no combination loads under Node 18, that is a blocker for goal 1.1 item 5 and is
    raised before the units start, not after.
@@ -235,7 +237,7 @@ when one of them changes.
 | `wasm-bindgen` | `=0.2.100` (it builds with Rust 1.99.0, so the pin was not raised) | 12.1 |
 | `wasm-opt` | off | 12.1, 15.2 |
 | `typescript` | `5.9.3` | `package.json`, 12.2 |
-| `tsup` | `8.5.1` | `package.json`, 12.2 |
+| `tsdown` | `0.23.1` (not a gate value: the gate ran with `tsup` `8.5.1`, which tsdown replaced afterwards; see below) | `package.json`, 12.2 |
 | `tsx` | `4.23.15` | `package.json`, 12.2 |
 | `@types/node` | `18.19.130` | `package.json`, 12.2 |
 
@@ -250,6 +252,14 @@ little-endian counter and HMAC-SHA1. The whole chain of `npm run build`, `npm pa
 `scripts/check-tarball.mjs` (with stand-ins for the unit files of `src/`) passed under Node
 18.20.8, 20.20.2, 22.22.0 and 24.21.0.
 
+That chain was the one of the gate: the bundler was tsup 8.5.1, the wasm output was in
+a top-level directory of its own, and the two published entries were hand-written files. The build has been migrated
+since (15.4): tsdown 0.23.1 is the bundler, the wasm output is in `dist/wasm/`, and no
+entry is written by hand. tsdown declares `node: ^22.18.0 || ^24.11.0 || >=26.0.0`, so the
+build no longer runs under Node 18 or 20; the package still supports Node 18 and newer,
+and the tests still run under every supported major (15.5). The gate has not been run
+again with tsdown. Where a finding below was made with tsup, it says so.
+
 What the gate found, and where this guide changed because of it:
 
 - A non-string at a `&str` or `Option<String>` parameter is not coerced by the glue. A
@@ -263,15 +273,18 @@ What the gate found, and where this guide changed because of it:
 - The declarations generated for the listing of 5.3 satisfy `YkkWasm`;
   `scripts/check-wasm-types.mjs` rejects a changed return type, a missing method and an
   added required parameter.
-- `typescript` 7.0.2 cannot be used: the package no longer exports the JavaScript compiler
-  API that tsup's `dts` build calls. `typescript` 6.0.3 fails in the same build with
-  `TS5101` (tsup passes `baseUrl`). 5.9.3 builds with the `tsconfig.json` and
-  `tsup.config.ts` of 15.4 unchanged.
-- In the CommonJS bundle tsup's `import.meta.url` shim is `new URL('file:' + __filename)`,
-  which loses everything after a `#` or `?` in the install path and decodes `%XX`:
-  `require('@thilllon/ykk')` then fails with `Cannot find module '../pkg/ykk_wasm.cjs'`.
-  `src/wasm.ts` passes `__filename` to `createRequire` where it exists (15.3).
-- `wasm-pack` also writes `pkg/ykk_wasm_bg.wasm.d.ts`; the build script removes it (15.2).
+- `typescript` is pinned at 5.9.3. With tsup's `dts` build the gate could use neither
+  7.0.2 (the package no longer exports the JavaScript compiler API) nor 6.0.3 (`TS5101`,
+  tsup passed `baseUrl`). Neither version has been tried with tsdown's `dts` build; the
+  pin is unchanged.
+- `src/wasm.ts` passes `__filename` to `createRequire` where it exists, which is in the
+  CommonJS bundle, and `import.meta.url` otherwise (15.3). The gate found the reason with
+  tsup: its `import.meta.url` shim for CommonJS lost everything after a `#` or `?` in the
+  install path and decoded `%XX`, and the package then could not find its wasm.
+  `tsdown.config.ts` sets no shim option, and the spelling of `src/wasm.ts` does not depend
+  on one.
+- `wasm-pack` also writes `ykk_wasm_bg.wasm.d.ts` next to the glue; the build script
+  removes it (15.2).
 - `rustup` with the `minimal` profile installs neither `rustfmt` nor `clippy` for the
   pinned toolchain; `rust-toolchain.toml` lists both components (12.3).
 - With `wasm-opt` enabled, `wasm-pack` 0.15.0 runs whichever `wasm-opt` it finds on `PATH`
@@ -279,7 +292,8 @@ What the gate found, and where this guide changed because of it:
   placeholder module from 155 KiB to 131 KiB). The published binary would then depend on
   an unpinned tool, so it stays off.
 - `npm pack --json` prints the output of the `prepack` script on the same stdout, before
-  the JSON report (15.5).
+  the JSON report. `scripts/check-tarball.mjs` now packs with `--ignore-scripts` and still
+  reads the report from the end of stdout (15.5).
 - The `overrides` block this guide first pinned (one nested object per oracle package) does
   not work with npm 10: `zip-stream` 7.0.5 resolves the 6.0.0 versions of its two
   dependencies, and `npm ci` rejects the lockfile. It was replaced by a flat block keyed by package and major range, with which
@@ -289,8 +303,10 @@ What the gate found, and where this guide changed because of it:
   `node: 20 || >=22`. On Node 18 `npm install` prints an `EBADENGINE` warning for it; it
   loads and expands braces under Node 18.0.0 and 18.20.8. `minimatch` itself declares
   `18 || 20 || >=22`.
-- `cjs/index.d.cts` (15.4) compiles, and both TypeScript smoke files of section 16 item 4
-  compile against the packed tarball.
+- The declaration of the CommonJS entry, which was a hand-written file at the time of the
+  gate, compiled, and both TypeScript smoke files of section 16 item 4 compiled against
+  the packed tarball. That declaration is now `dist/index.d.cts`, generated from
+  `src/commonjs.ts`; tsdown runs attw on it at level `error` in every build (15.4).
 - The package loads under Node 18.0.0. The test tooling needs Node 18.18 or newer
   (`mocha` 11.7.5 declares it, and `mocha -n import=tsx` needs `node --import`), which the
   Node 18 job of CI satisfies (12.3).
@@ -391,6 +407,7 @@ number.
 | V17 | The wasm encoder of an engine stream is freed when the stream is destroyed (5.4). `isZip64()` called after that throws the glue's `Error` (`null pointer passed to rust`) where upstream would still answer from JS state. `entry()` and `finish()` on a destroyed stream (archiver core reaches both after a `signal` abort) do not touch the encoder and do what upstream's writes to a destroyed stream amount to: a stored or empty buffer entry of the plain engine completes and calls back, every other entry never calls back (upstream's smart stream piped into a destroyed stream never ends), `finish()` writes nothing. A stream whose `signal` was already aborted is destroyed inside `super()`, before the encoder exists; the constructor frees the encoder it then creates. | Linear memory is not garbage collected in step with the JS heap; waiting for `FinalizationRegistry` alone lets it grow without bound. |
 | V18 | The encrypted constructors (`ZipEncrypted`, `ZipAesStream`, `ZipCryptoStream`, `CryptoStream`, `DecryptoStream`, `AesHmacEtmStream`) called as `X.call(this, options)` from a `util.inherits` subclass return a new instance and leave `this` uninitialised; upstream initialises `this` (zip-encrypted.js:31-35). `class extends X`, `X(options)` and `new X(options)` behave as upstream, and `X.name` and `instance.constructor` are upstream's. | R18: an ES class cannot be applied to an existing `this`. |
 | V19 | archiver 7's `Archiver.prototype.use(plugin)` (archiver-zip-encrypted/node_modules/archiver/lib/core.js:913-916) is not ported; calling it throws a `TypeError`. | It is `@private` and "yet to be fully implemented": it pushes into `_streams`, which nothing reads. archiver 8 removed it. |
+| V20 | The package ships one bundle per module format (`dist/index.mjs` for `import`, `dist/index.cjs` for `require`; 15.4). A process that loads both has two sets of classes, so `instanceof` does not hold across the two module formats: an archive made by `require('@thilllon/ykk')('zip')` is not an instance of the imported `Archiver`, and an error created by one bundle is not an instance of the other's `ArchiverError`. Within one format everything is as upstream. Two things are shared: the format registry of `src/vending.ts`, which is kept on `globalThis[Symbol.for('@thilllon/ykk.formats')]` (the bundle that loads first registers `zip`, `tar` and `json`, the other finds the registry and registers nothing, so a format registered through `require` is visible to `import` and the reverse), and the wasm instance (both bundles `require` the same `dist/wasm/ykk_wasm.cjs`). Upstream ships one module format per major, so it has one set of classes per installed copy. | No entry is written by hand: tsdown builds each format from `src/`, and publint and attw check the result (15.4). One set of classes for both formats needed a hand-written CommonJS entry, a hand-written declaration of it and a hand-written ESM entry that re-exported it. |
 
 ### 3.3 Upstream defects that are preserved
 
@@ -615,10 +632,11 @@ crates/ykk-core/tests/LEDGER.tsv             required cargo test names (14.3, 14
 crates/ykk-wasm/Cargo.toml                   (pinned, 12.1)
 crates/ykk-wasm/src/lib.rs                   wasm-bindgen classes (pinned signatures, 5.3)
 
-package.json  package-lock.json  tsconfig.json  tsup.config.ts  .gitattributes   (pinned, 15; there is deliberately no .mocharc file, 14.1)
-.github/workflows/ci.yml                     Linux and macOS, Node 18/20/22/24: build and the whole test matrix (15.5)
+package.json  package-lock.json  tsconfig.json  tsdown.config.ts  .gitattributes   (pinned, 15; there is deliberately no .mocharc file, 14.1)
+.github/workflows/ci.yml                     Linux and macOS, Node 18/20/22/24: build under Node 24, the whole test matrix under each (15.5)
 .github/workflows/release.yml                publish to npm from a version tag through the trusted publisher (15.5)
-src/index.ts                                 node-archiver/index.js + package entry
+src/index.ts                                 node-archiver/index.js + package entry (the ESM bundle is built from it)
+src/commonjs.ts                              CommonJS entry: the vending function merged with a namespace of every export (pinned, 15.4)
 src/core.ts                                  node-archiver/lib/core.js (+ archiver 7 setFormat/setModule/_moduleSupports)
 src/error.ts                                 node-archiver/lib/error.js
 src/utils.ts                                 node-archiver/lib/utils.js
@@ -655,30 +673,27 @@ src/encrypted/zip20/crypto-cipher.ts         TS part of .../lib/zip20/CryptoCiph
 src/encrypted/zip20/crypto-stream.ts         TS part of .../lib/zip20/crypto-stream.js
 src/encrypted/zip20/decrypto-stream.ts       TS part of .../lib/zip20/decrypto-stream.js
 src/encrypted/zip20/zip-crypto-stream.ts     TS part of .../lib/zip20/zip-crypto-stream.js
-cjs/index.cjs                                hand-written CommonJS entry (pinned, 15.4)
-cjs/index.d.cts                              hand-written declaration of the CommonJS entry (pinned, 15.4)
-esm/index.mjs                                hand-written ESM entry, re-exports cjs/index.cjs (pinned, 15.4)
 
-pkg/                                         wasm-pack output: ykk_wasm.cjs, ykk_wasm_bg.wasm, ykk_wasm.d.cts (build output, gitignored)
-dist/                                        tsup output: index.cjs, index.d.ts, index.d.cts, and index.mjs (built, not published, loaded by nothing; 15.4) (build output, gitignored)
+dist/                                        tsdown output: index.mjs, index.d.mts, index.cjs, index.d.cts and the two source maps (15.4) (build output, gitignored)
+dist/wasm/                                   wasm-pack output: ykk_wasm.cjs, ykk_wasm_bg.wasm, ykk_wasm.d.cts (15.2) (build output, gitignored with dist)
 
 scripts/fetch-upstream.sh                    exists; restores .upstream/ including both node_modules trees (header of this file)
 scripts/build-wasm.sh                        (pinned, 15.2)
-scripts/check-wasm-types.mjs                 fails the build if the generated pkg/ykk_wasm.d.cts does not satisfy src/wasm-types.ts (15.3)
-scripts/check-tarball.mjs                    packs, checks the file list, installs the tarball into an empty project, runs the smoke checks (15.5)
+scripts/check-wasm-types.mjs                 fails the build if the generated dist/wasm/ykk_wasm.d.cts does not satisfy src/wasm-types.ts (15.3)
+scripts/check-tarball.mjs                    packs the built dist/, checks the file list, installs the tarball into an empty project, runs the smoke checks (15.5)
 scripts/vendor-upstream-tests.mjs            copies the upstream test trees into tests/upstream/ and writes SHA256SUMS
 scripts/verify-upstream-tests.mjs            fails if a vendored test file differs from SHA256SUMS
 scripts/verify-oracle-versions.mjs           fails unless the installed upstream packages have the versions of the oracle table (14.2)
 scripts/check-test-ledger.mjs                compares both mocha suites with tests/upstream/LEDGER.tsv and `cargo test -- --list` with crates/ykk-core/tests/LEDGER.tsv (14.5)
 scripts/capture-golden.mjs                   runs the real upstream engines with fixed inputs, writes crates/ykk-core/tests/golden/ and tests/vectors/ (14.3)
 tests/upstream/node-archiver/package.json    {"type":"module"}
-tests/upstream/node-archiver/index.js        one-line shim: export * from "../../../esm/index.mjs" (the published ESM entry)
+tests/upstream/node-archiver/index.js        one-line shim: export * from "../../../dist/index.mjs" (the published ESM bundle)
 tests/upstream/node-archiver/test/**         verbatim copy of .upstream/node-archiver/test (archiver.js, plugins.js, helpers/, fixtures/)
 tests/upstream/archiver-zip-encrypted/package.json   {"type":"commonjs"}
 tests/upstream/archiver-zip-encrypted/index.js       shim (14.1)
 tests/upstream/archiver-zip-encrypted/lib/**         shims (14.1)
 tests/upstream/archiver-zip-encrypted/test/**        verbatim copy incl. test/resources
-tests/upstream/alias-archiver.cjs            mocha --require hook: resolves 'archiver' to cjs/index.cjs
+tests/upstream/alias-archiver.cjs            mocha --require hook: resolves 'archiver' to dist/index.cjs
 tests/upstream/SHA256SUMS  tests/upstream/LEDGER.tsv  tests/upstream/LICENSE.node-archiver  tests/upstream/LICENSE.archiver-zip-encrypted
 tests/differential/helpers/run-both.mjs      runs one scenario against upstream and against ykk, in process or in a child process (14.2)
 tests/differential/helpers/zip-records.mjs   zip record parser (local header, descriptor, central header, end records)
@@ -695,7 +710,7 @@ tests/vectors/sanitize-path.json             shared vectors for all sanitizePath
 ```
 
 `.gitignore` additions (scaffold unit): `tests/upstream/**/tmp`, `tests/upstream/**/target`.
-`pkg` and `dist` are already ignored.
+`dist` is already ignored, and `dist/wasm` with it.
 
 ### 4.1 Units
 
@@ -715,7 +730,7 @@ another unit (the phases after the loop follow 2.1).
 | rs-aes | rust-core | `zip/encrypted/{aes_hmac_etm_stream,zip_aes_stream}.rs` |
 | rs-tar | rust-core | `tar/{mod,headers,pack}.rs` |
 | rs-wasm | wasm | `crates/ykk-wasm/src/lib.rs` |
-| ts-scaffold | ts | `package.json`, `package-lock.json`, `tsconfig.json`, `tsup.config.ts`, `.gitattributes`, `.gitignore` additions, `src/{types,wasm,wasm-types,callable}.ts`, `cjs/index.cjs`, `cjs/index.d.cts`, `esm/index.mjs`, `scripts/{build-wasm.sh,check-wasm-types.mjs,check-tarball.mjs}`, `.github/workflows/{ci,release}.yml`; with rs-scaffold, the toolchain gate (2.2) |
+| ts-scaffold | ts | `package.json`, `package-lock.json`, `tsconfig.json`, `tsdown.config.ts`, `.gitattributes`, `.gitignore` additions, `src/{types,wasm,wasm-types,callable,commonjs}.ts`, `scripts/{build-wasm.sh,check-wasm-types.mjs,check-tarball.mjs}`, `.github/workflows/{ci,release}.yml`; with rs-scaffold, the toolchain gate (2.2) |
 | ts-core | ts | `src/core.ts` (one class, 851 raw upstream lines, about 480 without JSDoc; deliberately not split) |
 | ts-entry | ts | `src/{index,error,vending}.ts`, `src/plugins/json.ts` |
 | ts-helpers | ts | `src/{utils,queue,lazystream,is-stream,normalize-path,zlib-options}.ts` |
@@ -2073,13 +2088,16 @@ export { default } from './vending.js';                // the archiver 7 vending
 
 `src/vending.ts` is a literal port of
 archiver-zip-encrypted/node_modules/archiver/index.js:8-84: a module-level
-`var formats = {}` (a plain object, as upstream), `vending(format, options)`,
+`formats` (a plain object, as upstream; ykk keeps it on
+`globalThis[Symbol.for('@thilllon/ykk.formats')]`, so that the two bundles of the package
+share one registry, V20 and 15.4), `vending(format, options)`,
 `vending.create`, `vending.registerFormat`, `vending.isRegisteredFormat`, with the four
 thrown messages `'create(' + format + '): format not registered'`,
 `'register(' + format + '): format already registered'`,
 `'register(' + format + '): format module invalid'`,
 `'register(' + format + '): format module missing methods'`, and the three pre-registrations
-`zip`, `tar`, `json` (index.js:80-82) using `src/plugins/*`. `'zip-encrypted'` is not
+`zip`, `tar`, `json` (index.js:80-82) using `src/plugins/*`, made only by the bundle that
+finds no registry yet (`if (!registered)`, V20). `'zip-encrypted'` is not
 pre-registered (callers register it, as with upstream). `create` does
 `new Archiver(format, options)`, `instance.setFormat(format)`,
 `instance.setModule(new formats[format](options))` (index.js:33-35). It imports `Archiver`
@@ -3468,7 +3486,7 @@ encrypted subclasses override only `_encryptionMethod`, `_entryKey`, `_entryRand
 call; wasm only ever receives the narrowed value.
 
 **TS-40 Module-format assumptions of the tests.** Solved by shims next to the vendored
-tests and by `cjs/index.cjs` (14.1, 15.4), never by editing tests.
+tests and by the CommonJS entry `src/commonjs.ts` (14.1, 15.4), never by editing tests.
 
 **TS-41 Type assertions for dynamically typed upstream expressions.** `"strict": true` rejects
 several patterns this guide tells you to keep. The only allowed way out is `as T` or
@@ -3495,7 +3513,7 @@ callback.apply(this, arguments as unknown as Parameters<Readable['_read']>);
 (this._module as ArchiverModule).pipe(this);
 
 // values coming out of nodeRequire (15.3)
-export const wasm = nodeRequire('../pkg/ykk_wasm.cjs') as YkkWasm;
+export const wasm = nodeRequire('./wasm/ykk_wasm.cjs') as YkkWasm;
 
 // a bag typed `unknown` that is handed to a Node API (7.7)
 zlib.createDeflateRaw(options as ZlibOptions).close();
@@ -3982,11 +4000,13 @@ Runtime `dependencies` (exact list):
 | `minimatch` | `^10.2.2` | fixed decision; the range readdir-glob 3.0.0 declares |
 | `streamx` | `^2.28.1` | base classes of the tar engine (R2) |
 
-`devDependencies`: `typescript@5.9.3`, `tsup@8.5.1`, `tsx@4.23.15` (runs the one TypeScript
-test file, 14.3), `@types/node@18.19.130` (these four at the exact versions the toolchain
-gate recorded, 2.2; `typescript` stays below 6 while the build uses tsup's `dts`, and
-`@types/node` stays on the 18 line so that `tsc` rejects an API the lowest supported Node
-does not have), `mocha@11.7.5`, `chai@6.2.2`, `mkdirp@3.0.1`, `tar@6.2.1` (must stay on 6: the test uses
+`devDependencies`: `typescript@5.9.3`, `tsdown@0.23.1`, `tsx@4.23.15` (runs the one
+TypeScript test file, 14.3), `@types/node@18.19.130` (`typescript`, `tsx` and `@types/node`
+at the exact versions the toolchain gate recorded, 2.2; `tsdown` replaced the `tsup` of the
+gate and is pinned exactly too; `@types/node` stays on the 18 line so that `tsc` rejects an
+API the lowest supported Node does not have), `publint@0.3.24` and
+`@arethetypeswrong/core@0.18.5` (tsdown runs both on the CommonJS build, 15.4),
+`mocha@11.7.5`, `chai@6.2.2`, `mkdirp@3.0.1`, `tar@6.2.1` (must stay on 6: the test uses
 the default export), `yauzl@3.3.0`, `readable-stream@^4.7.0`, `should@^13.2.3`,
 `rimraf@^5.0.5`, `lazystream@^1.0.1`, `aes-js@3.1.2`, and for the differential tests
 `archiver@8.0.0` and `archiver-zip-encrypted@2.0.0` (which brings its own nested
@@ -4015,8 +4035,9 @@ on macOS aarch64 and which builds with Rust 1.99.0). Both are fixed by the toolc
 archive `wasm-pack-v0.15.0-<target>.tar.gz`. `rustfmt` 1.10.0 with its defaults is the
 formatter (there is no `rustfmt.toml`): the Rust listings of this guide are laid out for
 reading, and every Rust file is run through `cargo fmt` before it is handed over. Node >= 18
-for running; Node >= 18.18 for building and testing (`mocha` 11.7.5 and `node --import`
-need it; CI builds on every supported major); `7z` on `PATH` for five upstream tests (TESTS-092) and for the extraction
+for running; Node >= 18.18 for testing (`mocha` 11.7.5 and `node --import` need it); Node
+`^22.18.0 || ^24.11.0 || >=26.0.0` for building (tsdown 0.23.1 declares it; CI builds under
+Node 24 and tests under every supported major, 15.5); `7z` on `PATH` for five upstream tests (TESTS-092) and for the extraction
 checks; `tar` (bsdtar or GNU tar) for the extraction checks.
 
 ---
@@ -4139,14 +4160,14 @@ imports are satisfied by shim files placed where the tests expect the library:
 
 ```
 tests/upstream/node-archiver/package.json            {"type":"module"}
-tests/upstream/node-archiver/index.js                export * from "../../../esm/index.mjs";
+tests/upstream/node-archiver/index.js                export * from "../../../dist/index.mjs";
 tests/upstream/node-archiver/test/...                verbatim (archiver.js, plugins.js, helpers/index.js, fixtures/**)
 
 tests/upstream/archiver-zip-encrypted/package.json   {"type":"commonjs"}
 tests/upstream/archiver-zip-encrypted/index.js       module.exports = require('./lib/zip-encrypted');
-tests/upstream/archiver-zip-encrypted/lib/zip-encrypted.js             module.exports = require('../../../../cjs/index.cjs').ZipEncrypted;
+tests/upstream/archiver-zip-encrypted/lib/zip-encrypted.js             module.exports = require('../../../../dist/index.cjs').ZipEncrypted;
 tests/upstream/archiver-zip-encrypted/lib/aes/aes-hmac-etm-stream.js   (below)
-tests/upstream/archiver-zip-encrypted/lib/zip20/zip-crypto-stream.js   module.exports = require('../../../../../cjs/index.cjs').ZipCryptoStream;
+tests/upstream/archiver-zip-encrypted/lib/zip20/zip-crypto-stream.js   module.exports = require('../../../../../dist/index.cjs').ZipCryptoStream;
 tests/upstream/archiver-zip-encrypted/lib/zip20/crypto-stream.js       ... .CryptoStream;
 tests/upstream/archiver-zip-encrypted/lib/zip20/decrypto-stream.js     ... .DecryptoStream;
 tests/upstream/archiver-zip-encrypted/test/...       verbatim (6 spec files, resources/**)
@@ -4163,12 +4184,12 @@ aes.Counter.prototype.increment = function () {
     if (this._counter[i] === 255) { this._counter[i] = 0; } else { this._counter[i]++; break; }
   }
 };
-module.exports = require('../../../../../cjs/index.cjs').AesHmacEtmStream;
+module.exports = require('../../../../../dist/index.cjs').AesHmacEtmStream;
 
 // tests/upstream/alias-archiver.cjs   (mocha --require)
 const Module = require('node:module');
 const path = require('node:path');
-const target = path.resolve(__dirname, '../../cjs/index.cjs');
+const target = path.resolve(__dirname, '../../dist/index.cjs');
 const resolveFilename = Module._resolveFilename;
 Module._resolveFilename = function (request, ...rest) {
   return request === 'archiver' ? target : resolveFilename.call(this, request, ...rest);
@@ -4188,9 +4209,9 @@ Mocha's default spec (`./test/*.{js,cjs,mjs}`, not recursive) selects exactly th
 `this.skip()`, and they share fixture symlinks and the `tmp/` and `target/` directories, so
 they must run serially in one process (TESTS-014, R20). No `.mocharc` file exists anywhere
 in the repository (mocha would pick it up from a parent directory and change these runs).
-The node-archiver suite loads the published ESM entry (`esm/index.mjs`), the encrypted
-suite the published CommonJS entry (`cjs/index.cjs`). Both run the one implementation in
-`dist/index.cjs` (15.4).
+The node-archiver suite loads the published ESM bundle (`dist/index.mjs`), the encrypted
+suite the published CommonJS bundle (`dist/index.cjs`). They are two builds of the same
+sources, each with its own classes (15.4, V20).
 
 Prerequisites: `7z` on `PATH` (5 tests spawn it); a clean fixture tree (a crashed run
 leaves two symlinks behind that make the next run fail with EEXIST, TESTS-012: the npm
@@ -4636,12 +4657,12 @@ the attributes this guide prints.
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")/.."
-rm -rf pkg
-wasm-pack build crates/ykk-wasm --release --target nodejs --out-dir ../../pkg --out-name ykk_wasm --no-pack
-rm -f pkg/.gitignore pkg/package.json pkg/README.md pkg/ykk_wasm_bg.wasm.d.ts
-mv pkg/ykk_wasm.js pkg/ykk_wasm.cjs
-mv pkg/ykk_wasm.d.ts pkg/ykk_wasm.d.cts
-node -e "const w = require('./pkg/ykk_wasm.cjs'); if (typeof w.WasmZipStream !== 'function' || w.crc32Update(0, Buffer.from('test')) !== 3632233996) process.exit(1)"
+rm -rf dist/wasm
+wasm-pack build crates/ykk-wasm --release --target nodejs --out-dir ../../dist/wasm --out-name ykk_wasm --no-pack
+rm -f dist/wasm/.gitignore dist/wasm/package.json dist/wasm/README.md dist/wasm/ykk_wasm_bg.wasm.d.ts
+mv dist/wasm/ykk_wasm.js dist/wasm/ykk_wasm.cjs
+mv dist/wasm/ykk_wasm.d.ts dist/wasm/ykk_wasm.d.cts
+node -e "const w = require('./dist/wasm/ykk_wasm.cjs'); if (typeof w.WasmZipStream !== 'function' || w.crc32Update(0, Buffer.from('test')) !== 3632233996) process.exit(1)"
 ```
 
 The `nodejs` target emits CommonJS glue that reads `ykk_wasm_bg.wasm` next to itself with
@@ -4650,21 +4671,27 @@ The `nodejs` target emits CommonJS glue that reads `ykk_wasm_bg.wasm` next to it
 synchronous load the tests need (`new JsonArchive()` at module evaluation time, TESTS-015).
 The file is renamed to `.cjs` because the package is `"type": "module"`. `wasm-pack` also
 writes `ykk_wasm_bg.wasm.d.ts`, the declarations of the raw wasm exports, which nothing
-imports; it is removed so that `pkg/` holds exactly the three files of 15.5. The last line
+imports; it is removed so that `dist/wasm/` holds exactly the three files of 15.5. The
+output directory is inside `dist/`, next to the two bundles that load it (15.3). The script
+removes `dist/wasm` only, never `dist`: `npm run build` runs tsdown first, which cleans
+`dist/` and writes the bundles, and this script after it (15.4). The last line
 fails the build if a future toolchain stops emitting CommonJS. The build is always
 `--release`: wasm-pack's dev profile makes the glue assert argument types, which would
 replace the number coercions that section 5.6 relies on with thrown errors. `wasm-opt` is
 switched off in the crate manifest (12.1): the gate confirmed that the build is complete
-without it, and that with it the result depends on whichever `wasm-opt` is on `PATH` (2.2). The last line runs under whatever Node executes
-the build; CI builds on every supported major including the lowest (Node 18), so a `.wasm`
-that the current Rust emits but an old V8 cannot load fails the build there, not at a
-user's site. The command line, the Rust version and the wasm-pack version are the ones the
-toolchain gate proved (2.2).
+without it, and that with it the result depends on whichever `wasm-opt` is on `PATH` (2.2).
+The last line runs under whatever Node executes the build, which in CI is Node 24 (15.5).
+It does not show that an old V8 can load the `.wasm`. The tests show that: every job of the
+matrix runs them under its own Node, down to the lowest supported major (Node 18), and
+they load `dist/wasm/ykk_wasm.cjs` through the two bundles. A `.wasm` that the current
+Rust emits but an old V8 cannot load fails there, not at a user's site. The command line,
+the Rust version and the wasm-pack version are the ones the toolchain gate proved (2.2);
+only the output directory has changed since.
 
 ### 15.3 Loading it (`src/wasm.ts` and `src/wasm-types.ts`, scaffold unit, verbatim)
 
 ```ts
-// src/wasm-types.ts: the TypeScript view of section 5.3. Hand-written; nothing is imported from pkg/.
+// src/wasm-types.ts: the TypeScript view of section 5.3. Hand-written; nothing is imported from dist/wasm/.
 export interface WasmZipEntryInfo {
   readonly name: string;
   readonly size: number;
@@ -4753,11 +4780,15 @@ import type { YkkWasm } from './wasm-types.js';
 
 export type { YkkWasm, WasmZipEntryInfo } from './wasm-types.js';
 
-// __filename exists in the CommonJS bundle; tsup's import.meta.url shim there mangles '#', '?' and '%' in the path.
+// __filename exists in the CommonJS bundle; import.meta.url is the ES module one.
 const nodeRequire = createRequire(typeof __filename === 'string' ? __filename : import.meta.url);
 
-/** The instantiated wasm module. Loaded synchronously when this module is evaluated. */
-export const wasm = nodeRequire('../pkg/ykk_wasm.cjs') as YkkWasm;
+/**
+ * The instantiated wasm module. Loaded synchronously when this module is evaluated.
+ * The path is relative to the bundle (dist/index.mjs, dist/index.cjs): scripts/build-wasm.sh
+ * writes the glue to dist/wasm. Both bundles load the same file, so there is one wasm instance.
+ */
+export const wasm = nodeRequire('./wasm/ykk_wasm.cjs') as YkkWasm;
 
 export const EMPTY: Buffer = Buffer.alloc(0);
 
@@ -4776,15 +4807,17 @@ export function wasmString(value: unknown): string {
 }
 ```
 
-`../pkg/ykk_wasm.cjs` is correct both from `src/` (unbundled) and from `dist/` (bundled):
-both directories sit one level below the package root. The call goes through `nodeRequire`,
-so the bundler leaves it alone (and so does a bundler in an application: 1.2).
-`createRequire` accepts a path or a `file:` URL. In the ESM bundle and in unbundled ESM it
-gets a location derived from `import.meta.url`, which Node escapes correctly. In the CJS
-bundle it gets `__filename`: tsup's `shims` option would supply `import.meta.url` there as
-`new URL('file:' + __filename).href`, which drops everything after a `#` or `?` in the
-install path and decodes `%XX`, so the package could not find its wasm when installed
-under such a directory (observed by the gate, 2.2).
+`./wasm/ykk_wasm.cjs` is a path relative to the bundle: `dist/index.mjs` and
+`dist/index.cjs` both sit next to `dist/wasm/`, where `scripts/build-wasm.sh` writes the
+glue (15.2). It is not correct from `src/` unbundled, and no unbundled code path loads
+wasm: the one TypeScript unit test (`tests/unit/sanitize-path.test.ts`, 14.3) imports only
+`src/normalize-path.ts` and the two `sanitizePath` utilities (`src/utils.ts`,
+`src/zip-stream/utils.ts`), none of which imports `src/wasm.ts`. Both bundles require the
+same file, so a process that loads both has one wasm instance (Node's module cache, V20).
+The call goes through `nodeRequire`, so the bundler leaves it alone (and so does a bundler
+in an application: 1.2). `createRequire` accepts a path or a `file:` URL. In the CommonJS
+bundle it gets `__filename`, in the ESM bundle `import.meta.url`. `tsdown.config.ts` sets
+no shim option, and the first branch does not need one (2.2).
 
 `wasmString` is the one guard for string arguments (5.6). It is an addition with no
 upstream counterpart: a string passes through unchanged, so no call inside the contract of
@@ -4792,7 +4825,7 @@ the published types behaves differently, and a value outside it becomes a `TypeE
 thrown at the call site instead of a trap (V14). In `_engineEntry` the call site is inside
 the `try` of `_appendBuffer` / `_appendStream`, so there it reaches the entry callback.
 
-No TypeScript file imports types from `pkg/`. `tsc --noEmit` and every TypeScript unit
+No TypeScript file imports types from `dist/wasm/`. `tsc --noEmit` and every TypeScript unit
 therefore work without a Rust toolchain and before any Rust code exists; the interface
 above is what they are written against, member for member the listing of 5.3 under the
 marshalling rules of 5.6 (`f64`, `u8`, `u16`, `u32`, `i32` are `number`; `&[u8]` and
@@ -4801,8 +4834,8 @@ is `T` and a thrown `Error`; a `#[wasm_bindgen(getter)]` is a `readonly` propert
 class has `free()`).
 
 Drift between the two listings is caught by `scripts/check-wasm-types.mjs` (scaffold unit),
-which `npm run build` runs between the wasm build and tsup: it writes a temporary
-TypeScript file that assigns `typeof import('<root>/pkg/ykk_wasm.cjs')` to a variable of
+which `npm run build` runs last, after tsdown and the wasm build: it writes a temporary
+TypeScript file that assigns `typeof import('<root>/dist/wasm/ykk_wasm.cjs')` to a variable of
 type `YkkWasm` (imported from `src/wasm-types.ts`), runs `tsc --noEmit --strict` on it and
 exits non-zero if tsc reports an error. The check is one-directional: the generated surface
 must satisfy the interface. An export that exists in Rust but not in 5.3 is a review
@@ -4811,56 +4844,66 @@ finding for unit rs-wasm.
 ### 15.4 Bundling and the two module formats
 
 ```ts
-// tsup.config.ts (scaffold unit, verbatim)
-import { defineConfig } from 'tsup';
-export default defineConfig({
-  entry: { index: 'src/index.ts' },
-  format: ['esm', 'cjs'],
+// tsdown.config.ts (scaffold unit, verbatim)
+import { defineConfig } from 'tsdown';
+
+const shared = {
+  platform: 'node' as const,
   target: 'node18',
-  platform: 'node',
+  fixedExtension: true,
+  tsconfig: 'tsconfig.json',
   dts: true,
-  shims: true,
-  splitting: false,
   sourcemap: true,
-  clean: true,
-  outExtension: ({ format }) => ({ js: format === 'esm' ? '.mjs' : '.cjs' }),
-});
+  deps: { neverBundle: true as const },
+};
+
+export default defineConfig([
+  { ...shared, entry: { index: 'src/index.ts' }, format: 'esm', clean: true },
+  // A default-only entry: tsdown emits `module.exports = archiver` and `export = archiver`.
+  {
+    ...shared,
+    entry: { index: 'src/commonjs.ts' },
+    format: 'cjs',
+    clean: false,
+    publint: { strict: true },
+    attw: { level: 'error' as const },
+  },
+]);
 ```
 
-Outputs: `dist/index.mjs`, `dist/index.cjs`, `dist/index.d.ts`, `dist/index.d.cts`. The
-declaration files are produced by tsup's `dts` build from `src/index.ts`.
+Two builds, one per module format. The first bundles `src/index.ts` into `dist/index.mjs`
+with the declarations `dist/index.d.mts`. The second bundles `src/commonjs.ts` into
+`dist/index.cjs` with the declarations `dist/index.d.cts`. Each bundle has a source map.
+`fixedExtension` gives those extensions to both formats. `deps.neverBundle` keeps the
+dependencies out of the bundles: `minimatch` and `streamx` are loaded from `node_modules`
+when the package runs. Only the first build cleans `dist/`, so the second does not delete
+what the first wrote, and the wasm build comes after both (15.2). On the CommonJS build
+tsdown runs publint in strict mode and attw at level `error`: the `package.json` and the
+declarations are checked by the build itself.
 
-The CommonJS entry must be the archiver 7 vending function itself, with everything else
-attached to it (TESTS-073). A bundler's CJS output is an exports object, so the published
-`require` entry is this hand-written file:
+tsdown 0.23.1 declares `node: ^22.18.0 || ^24.11.0 || >=26.0.0`. The package supports
+Node 18 and newer (`engines`, and `target: 'node18'` above). The build therefore needs a
+newer Node than the package: CI builds under Node 24 and tests under every supported major
+(15.5).
 
-```js
-// cjs/index.cjs (scaffold unit, verbatim)
-'use strict';
-const m = require('../dist/index.cjs');
-const archiver = m.default;
-for (const key of Object.keys(m)) {
-  if (key !== 'default') { archiver[key] = m[key]; }
-}
-archiver.default = archiver;
-module.exports = archiver;
-```
-
-The declaration of that entry is hand-written too. `dist/index.d.cts` describes an exports
-object with a `default` member, while `cjs/index.cjs` exports the callable vending function
-with the named exports attached; with tsup's file as the `require` types,
-`import archiver = require('@thilllon/ykk'); archiver('zip')` would be a type error although
-it runs. It is a function merged with a namespace of import aliases, so that every member
-has a declaration of its own: with a mapped type (`Omit<typeof m, 'default'>`) in the
-exported type, tsc aborts on a named import from a CommonJS file.
+No entry is written by hand. The CommonJS entry must be the archiver 7 vending function
+itself, with everything else attached to it (TESTS-073). A bundler's CJS output for
+`src/index.ts` is an exports object with a `default` member, so the `require` bundle is
+built from a second source file that has only a default export. For such an entry tsdown
+emits `module.exports = archiver` in `dist/index.cjs` and `export = archiver` in
+`dist/index.d.cts`:
 
 ```ts
-// cjs/index.d.cts (scaffold unit, verbatim)
-import m = require('../dist/index.cjs');
+// src/commonjs.ts (scaffold unit, verbatim)
+// The CommonJS entry. `require('@thilllon/ykk')` is the archiver 7 vending function itself, with
+// every export of src/index.ts as a property (archiver 7: `require('archiver')('zip')`).
+import * as m from './index.js';
 
-declare function archiver(format: string, options?: m.ArchiverOptions): m.Archiver;
-declare namespace archiver {
-  // one line per export of src/index.ts: the values, then the types of src/types.ts
+function archiver(format: string, options?: m.ArchiverOptions): m.Archiver {
+  return m.default(format, options);
+}
+
+namespace archiver {
   export import Archiver = m.Archiver;
   export import ZipArchive = m.ZipArchive;
   export import TarArchive = m.TarArchive;
@@ -4876,68 +4919,94 @@ declare namespace archiver {
   export import create = m.create;
   export import registerFormat = m.registerFormat;
   export import isRegisteredFormat = m.isRegisteredFormat;
-  export type DateFields = m.DateFields;
-  export type EntryData = m.EntryData;
-  export type EntryDataFunction = m.EntryDataFunction;
-  export type ProgressData = m.ProgressData;
-  export type GlobOptions = m.GlobOptions;
-  export type ArchiverEvents = m.ArchiverEvents;
-  export type ModuleCallback = m.ModuleCallback;
-  export type ArchiverModule = m.ArchiverModule;
-  export type ModuleConstructor = m.ModuleConstructor;
-  export type CoreOptions = m.CoreOptions;
-  export type ZipOptions = m.ZipOptions;
-  export type TarOptions = m.TarOptions;
-  export type EncryptedOptions = m.EncryptedOptions;
-  export type CryptoStreamOptions = m.CryptoStreamOptions;
-  export type DecryptoStreamOptions = m.DecryptoStreamOptions;
-  export type AesHmacEtmStreamOptions = m.AesHmacEtmStreamOptions;
-  export type ArchiverOptions = m.ArchiverOptions;
-  export type Match = m.Match;
-  export type QueueTask = m.QueueTask;
-  const _default: typeof archiver;
-  export { _default as default };
 }
-export = archiver;
-```
 
-The toolchain gate compiled this file with `typescript` 5.9.3 against the declarations
-tsup produced for a stand-in entry with the export list of 7.2 (2.2): `archiver('zip')`,
-`archiver.create`, `archiver.default`, `new archiver.ZipArchive()` and the type aliases
-resolve to real types, and a wrong member or argument is rejected. The alias list must
-follow 7.1 and 7.2: a type added to `src/types.ts` gets an alias here in the same change.
-The CommonJS TypeScript smoke check of section 16 item 4 compiles against the file in every
-CI job; if tsc rejects it, this section is corrected first (M8).
+// The types of src/types.ts as members: `import archiver = require(...)`, then `archiver.EntryData`.
+// Ambient, so nothing is emitted for it.
+declare namespace archiver {
+  export import DateFields = m.DateFields;
+  export import EntryData = m.EntryData;
+  export import EntryDataFunction = m.EntryDataFunction;
+  export import ProgressData = m.ProgressData;
+  export import GlobOptions = m.GlobOptions;
+  export import ArchiverEvents = m.ArchiverEvents;
+  export import ModuleCallback = m.ModuleCallback;
+  export import ArchiverModule = m.ArchiverModule;
+  export import ModuleConstructor = m.ModuleConstructor;
+  export import CoreOptions = m.CoreOptions;
+  export import ZipOptions = m.ZipOptions;
+  export import TarOptions = m.TarOptions;
+  export import EncryptedOptions = m.EncryptedOptions;
+  export import CryptoStreamOptions = m.CryptoStreamOptions;
+  export import DecryptoStreamOptions = m.DecryptoStreamOptions;
+  export import AesHmacEtmStreamOptions = m.AesHmacEtmStreamOptions;
+  export import ArchiverOptions = m.ArchiverOptions;
+  export import Match = m.Match;
+  export import QueueTask = m.QueueTask;
+}
 
-Both formats load one module instance: the `formats` registry of `src/vending.ts`, the
-`ArchiverError` constructor and the wasm instance exist once per process, as with upstream
-(one format per major). The published `import` entry is this hand-written file:
-
-```js
-// esm/index.mjs (scaffold unit, verbatim)
-import archiver from '../cjs/index.cjs';
+// Transpiled `import archiver from` reads `.default` of the required module.
+(archiver as { default?: unknown }).default = archiver;
 
 export default archiver;
-export const {
-  Archiver, ZipArchive, TarArchive, JsonArchive, ArchiverError,
-  ZipEncrypted, ZipAesStream, AesHmacEtmStream, ZipCryptoStream, CryptoStream, DecryptoStream, CryptoCipher,
-  create, registerFormat, isRegisteredFormat,
-} = archiver;
 ```
 
-Node finds no named export on `cjs/index.cjs` by static analysis (they are attached in a
-loop), hence the list; `scripts/check-tarball.mjs` fails when it differs from the keys of
-the CommonJS entry. `dist/index.mjs` is still built, because the `esm` format of
-tsup is what produces `dist/index.d.ts`, the types of the `import` entry. Nothing loads
-it: the node-archiver suite and the differential tests import `esm/index.mjs` (14.1,
-14.2), so the tests run the entry that is published. It is left out of the tarball by
-`files`. The top-level
+It is a function merged with two namespaces. The value members are in a normal namespace:
+`export import X = m.X` there emits the property assignment, so every value export of
+`src/index.ts` is a property of the function. The type members are in an ambient
+`declare namespace`, for which nothing is emitted. They are import aliases too: a plain
+`export type X = m.X` in that namespace was flattened by the declaration bundler into
+`type X = X` (TS2456). With `export = archiver` as the `require` types,
+`import archiver = require('@thilllon/ykk'); archiver('zip')` type-checks, and so do
+`archiver.create`, `new archiver.ZipArchive()` and `archiver.EntryData`. The alias lists
+must follow 7.1 and 7.2: an export added to `src/index.ts` or a type added to
+`src/types.ts` gets a line here in the same change. `scripts/check-tarball.mjs` fails when
+the export names of the two bundles differ (15.5), and the CommonJS TypeScript smoke check
+of section 16 item 4 compiles against `dist/index.d.cts` in every CI job; if tsc rejects
+it, this section is corrected first (M8).
+
+The ESM entry does not re-export the CommonJS one. `import` loads `dist/index.mjs` and
+`require` loads `dist/index.cjs`: two bundles of the same sources, each with its own set
+of classes. A process that loads both therefore has two `Archiver` constructors and two
+`ArchiverError` constructors, and `instanceof` does not hold across the two module formats
+(V20). Two things are shared.
+
+The format registry. `src/vending.ts` keeps `formats` on a global symbol, and only the
+bundle that loads first registers the built-in formats:
+
+```ts
+// src/vending.ts (unit ts-entry; the lines that differ from upstream's `var formats = {}` and its three registrations)
+// One registry for the ES module bundle and the CommonJS bundle of this package: a format
+// registered through `require` is visible to `import` and the reverse (PORTING.md 15.4).
+var REGISTRY = Symbol.for('@thilllon/ykk.formats');
+var shared = globalThis as { [REGISTRY]?: Record<string, ModuleConstructor> };
+var registered = shared[REGISTRY] !== undefined;
+var formats: Record<string, ModuleConstructor> = shared[REGISTRY] ??= {};
+...
+if (!registered) {
+  vending.registerFormat('zip', Zip);
+  vending.registerFormat('tar', Tar);
+  vending.registerFormat('json', Json);
+}
+```
+
+A format registered through `require` is visible to `import` and the reverse. Without the
+guard the second bundle would throw `register(zip): format already registered` while it
+loads.
+
+The wasm instance. Both bundles `require` the same `dist/wasm/ykk_wasm.cjs` (15.3), which
+Node's module cache evaluates once.
+
+The node-archiver suite and the differential tests import `dist/index.mjs`, the encrypted
+suite and the archiver 7 surface of the differential tests require `dist/index.cjs` (14.1,
+14.2), so the tests run the files that are published. The top-level
 `types` describes `main`, for a compiler that does not read `exports`
 (`moduleResolution: node10`).
 
 `package.json` (scaffold unit; this is the whole file and every field is binding. `version`
-is the version that is published. The exact versions of `typescript`, `tsup`, `tsx` and
-`@types/node` in `devDependencies` are the ones recorded by the toolchain gate, 2.2):
+is the version that is published. The exact versions of `typescript`, `tsx` and
+`@types/node` in `devDependencies` are the ones recorded by the toolchain gate, 2.2;
+`tsdown`, `publint` and `@arethetypeswrong/core` are pinned exactly as well):
 
 ```json
 {
@@ -4947,21 +5016,22 @@ is the version that is published. The exact versions of `typescript`, `tsup`, `t
   "license": "MIT",
   "repository": { "type": "git", "url": "git+https://github.com/thilllon/ykk.git" },
   "type": "module",
-  "main": "./cjs/index.cjs",
-  "module": "./esm/index.mjs",
-  "types": "./cjs/index.d.cts",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.cts",
   "exports": {
     ".": {
-      "import": { "types": "./dist/index.d.ts", "default": "./esm/index.mjs" },
-      "require": { "types": "./cjs/index.d.cts", "default": "./cjs/index.cjs" }
+      "import": { "types": "./dist/index.d.mts", "default": "./dist/index.mjs" },
+      "require": { "types": "./dist/index.d.cts", "default": "./dist/index.cjs" }
     },
     "./package.json": "./package.json"
   },
-  "files": ["dist", "!dist/index.mjs", "!dist/index.mjs.map", "pkg", "cjs", "esm", "THIRD_PARTY_NOTICES.md"],
+  "files": ["dist", "THIRD_PARTY_NOTICES.md"],
   "engines": { "node": ">=18" },
   "publishConfig": { "access": "public" },
   "dependencies": { "minimatch": "^10.2.2", "streamx": "^2.28.1" },
   "devDependencies": {
+    "@arethetypeswrong/core": "0.18.5",
     "@types/node": "18.19.130",
     "aes-js": "3.1.2",
     "archiver": "8.0.0",
@@ -4970,11 +5040,12 @@ is the version that is published. The exact versions of `typescript`, `tsup`, `t
     "lazystream": "^1.0.1",
     "mkdirp": "3.0.1",
     "mocha": "11.7.5",
+    "publint": "0.3.24",
     "readable-stream": "^4.7.0",
     "rimraf": "^5.0.5",
     "should": "^13.2.3",
     "tar": "6.2.1",
-    "tsup": "8.5.1",
+    "tsdown": "0.23.1",
     "tsx": "4.23.15",
     "typescript": "5.9.3",
     "yauzl": "3.3.0"
@@ -4988,8 +5059,8 @@ is the version that is published. The exact versions of `typescript`, `tsup`, `t
   },
   "scripts": {
     "build:wasm": "bash scripts/build-wasm.sh",
-    "build:ts": "tsup",
-    "build": "npm run build:wasm && node scripts/check-wasm-types.mjs && npm run build:ts",
+    "build:ts": "tsdown",
+    "build": "npm run build:ts && npm run build:wasm && node scripts/check-wasm-types.mjs",
     "typecheck": "tsc --noEmit",
     "test:rust": "cargo test --workspace && cargo test --workspace --release",
     "test:unit": "mocha --no-config -n import=tsx \"tests/unit/*.test.ts\"",
@@ -5006,10 +5077,15 @@ is the version that is published. The exact versions of `typescript`, `tsup`, `t
 }
 ```
 
+`npm run build` has a fixed order: tsdown first, because its first build cleans `dist/`;
+then `scripts/build-wasm.sh`, which writes `dist/wasm/`; then
+`scripts/check-wasm-types.mjs`, which reads `dist/wasm/`.
 `npm test` expects a built tree (`npm run build` first; CI and `prepublishOnly` do that).
-`dist/` and `pkg/` are gitignored build outputs, so two hooks make a publish from a stale or
+`dist/` is a gitignored build output and holds everything that is built, the wasm
+included, so two hooks make a publish from a stale or
 empty tree impossible: `prepublishOnly` builds, runs the whole matrix against that build
-and checks the tarball; `prepack` builds again from the same sources when npm packs. The
+and checks the tarball; `prepack` builds again from the same sources when npm packs. Both
+hooks build, so both need the Node of the build tools. The
 `overrides` block pins the oracle trees of 14.2; if npm does not honor one of the entries,
 `scripts/verify-oracle-versions.mjs` stops the run, and the entry is corrected here first.
 
@@ -5048,39 +5124,49 @@ TESTS-106). The fixture and golden trees are excluded from every formatter.
 
 ### 15.5 What the published tarball contains
 
-`dist/` (the CommonJS bundle, its source map, the declarations), `pkg/ykk_wasm.cjs`,
-`pkg/ykk_wasm_bg.wasm`, `pkg/ykk_wasm.d.cts`, `cjs/index.cjs`, `cjs/index.d.cts`,
-`esm/index.mjs`, `package.json`, `README.md`, `LICENSE`, `THIRD_PARTY_NOTICES.md`. Nothing
-from `src/`, `crates/`, `tests/`, `.upstream/`, and not `dist/index.mjs` (15.4).
+13 files: `dist/index.mjs`, `dist/index.mjs.map`, `dist/index.d.mts`, `dist/index.cjs`,
+`dist/index.cjs.map`, `dist/index.d.cts`, `dist/wasm/ykk_wasm.cjs`,
+`dist/wasm/ykk_wasm_bg.wasm`, `dist/wasm/ykk_wasm.d.cts`, `package.json`, `README.md`,
+`LICENSE`, `THIRD_PARTY_NOTICES.md`. Nothing from `src/`, `crates/`, `tests/`, `scripts/`
+or `.upstream/`.
 
 `scripts/check-tarball.mjs` (scaffold unit) is the executable form of that list: it runs
-`npm pack --json --pack-destination <temporary directory>` (which runs `prepack`, so it
-builds; the script reads the JSON report from the end of stdout, because the output of the
-`prepack` script precedes it there), fails unless the file list contains `dist/index.cjs`,
-`dist/index.d.ts`, `dist/index.d.cts`, `cjs/index.cjs`, `cjs/index.d.cts`, `esm/index.mjs`,
-`pkg/ykk_wasm.cjs`, `pkg/ykk_wasm_bg.wasm`, `pkg/ykk_wasm.d.cts`, `THIRD_PARTY_NOTICES.md`
-and nothing under `src/`, `crates/`, `tests/` or `.upstream/` and no `dist/index.mjs`,
+`npm pack --json --ignore-scripts --pack-destination <temporary directory>`. It packs the
+`dist/` that `npm run build` wrote and runs no `prepack`, because it runs with the tests
+under every supported Node, and tsdown cannot run under Node 18 or 20. It reads the JSON
+report from the end of stdout and fails unless the file list contains `dist/index.mjs`,
+`dist/index.d.mts`, `dist/index.cjs`, `dist/index.d.cts`, `dist/wasm/ykk_wasm.cjs`,
+`dist/wasm/ykk_wasm_bg.wasm`, `dist/wasm/ykk_wasm.d.cts`, `THIRD_PARTY_NOTICES.md`
+and nothing under `src/`, `crates/`, `tests/`, `.upstream/` or `scripts/`. Then it
 installs the tarball into an empty temporary project
 (together with `typescript` and `@types/node` at the repository's versions, for the
 type checks) and runs the smoke checks of section 16 item 4 there under the Node that runs
 the script (the TypeScript files are `smoke.cts`, `smoke.mts` and `smoke.ts`; a check that
 has not exited after 120 s fails), then deletes the temporary directory and the tarball in it.
+The "both formats" check (`formats.mjs`) imports the package and requires it in one
+process: both have the same export names, the `require` result is the callable vending
+function and its own `default`, a format registered through one is registered in the
+other and `zip`, `tar` and `json` are registered in both, and the wasm glue is in the
+module cache once.
 With `--spec <package spec>` it packs nothing and installs that spec instead, so that the
 same checks can be run against the registry.
 
 `.github/workflows/ci.yml` (scaffold unit): on every push and pull request; matrix
-`ubuntu-latest` and `macos-latest` by Node 18, 20, 22, 24; steps: checkout, install `7z`
-(`p7zip-full` with apt, `p7zip` with brew; TESTS-092), set up Node, install the Rust
+`ubuntu-latest` and `macos-latest` by Node 18, 20, 22, 24. Every job installs and builds
+under Node 24, because tsdown does not run under Node 18 or 20 (15.4), then switches to
+the Node of the matrix for the tests. Steps: checkout, install `7z`
+(`p7zip-full` with apt, `p7zip` with brew; TESTS-092), set up Node 24, install the Rust
 toolchain named by `rust-toolchain.toml` with the wasm32 target, `rustfmt` and `clippy`
 (`rustup toolchain install` with the channel read from that file), restore the cache of
 cargo downloads and of the `wasm-bindgen` CLI that `wasm-pack` fetches, install `wasm-pack`
 at the pinned version from its release archive, verified against a recorded SHA-256
 (12.3), `npm ci`, `cargo fmt --check`, `cargo clippy --workspace -- -D warnings`,
-`npm run build`, `npm run typecheck`, `npm test`, `node scripts/check-tarball.mjs`.
+`npm run build`, `npm run typecheck`, set up the Node of the matrix, `npm test`,
+`node scripts/check-tarball.mjs`.
 
 `.github/workflows/release.yml` (scaffold unit): on a pushed tag `v<version>`, three jobs.
 `build` fails unless the tag equals the `version` of `package.json`; same setup as CI on
-`ubuntu-latest` with Node 22; `npm ci`; `npm run prepublishOnly`; `npm pack --ignore-scripts`;
+`ubuntu-latest` with Node 24; `npm ci`; `npm run prepublishOnly`; `npm pack --ignore-scripts`;
 uploads the archive as an artifact. It has no `id-token` permission, so build and test code
 cannot request the OIDC identity. `publish` is the only job with `id-token: write`; it checks
 out nothing, downloads the archive, requires npm 11.5.1 or later (Node 24) and runs
@@ -5117,20 +5203,21 @@ The port is done when all of the following hold on a clean checkout.
 1. Every non-test unit of `PORTMAP.tsv` has been through implementer, two reviewers and
    fixer, and every row of `BEHAVIORS.tsv` is implemented at its target (or is one of the
    non-ports of 3.4).
-2. No stub, no `todo!`/`unimplemented!`, no `any` in `dist/index.d.ts`, no `@ts-ignore`, no
+2. No stub, no `todo!`/`unimplemented!`, no `any` in `dist/index.d.mts` or `dist/index.d.cts`, no `@ts-ignore`, no
    `#[allow(dead_code)]` hiding an unported function, no paragraph-long justification
    comment (M6, M7).
 3. `cargo fmt --check`, `cargo clippy --workspace -- -D warnings`, `cargo test --workspace`
    and `cargo test --workspace --release` pass, and the cargo half of the ledger check
    passes (every test name of 14.3 exists, 14.5). `tsc --noEmit` passes.
-4. `npm run build` produces `pkg/` and `dist/` and `scripts/check-wasm-types.mjs` passes.
+4. `npm run build` produces `dist/` with `dist/wasm/` in it and `scripts/check-wasm-types.mjs` passes.
    From a packed tarball installed into an empty project (`scripts/check-tarball.mjs`), on
    Node 18, 20, 22 and 24, these smoke checks work and the process exits by itself:
    `node -e "require('@thilllon/ykk')('zip')"`;
    `node --input-type=module -e "import a, { ZipArchive } from '@thilllon/ykk'; new ZipArchive()"`;
-   a module that imports the package and requires it sees one instance (the default export
-   is the `require` result, the named exports are the keys of it and the same objects), and
-   `ArchiverError.name` and `ZipEncrypted.name` are those names;
+   a module that imports the package and requires it sees both formats agree (the same
+   export names in both, the `require` result is the callable vending function, a format
+   registered through one is registered in the other, the wasm glue is loaded once; V20),
+   and `ArchiverError.name` and `ZipEncrypted.name` are those names;
    a CommonJS TypeScript file (`smoke.cts`) containing
    `import archiver = require('@thilllon/ykk'); const a: archiver.Archiver = archiver('zip'); new archiver.ZipArchive();`
    and an ESM one (`smoke.mts`), which both use named imports, the typed events,
@@ -5145,7 +5232,7 @@ The port is done when all of the following hold on a clean checkout.
    versions `scripts/verify-oracle-versions.mjs` has confirmed; the slow cases (S1 to S5)
    have passed once on the release commit; all extraction checks of 14.4 pass.
 7. The only behavior differences from upstream are the V rows of 3.2 (V15 for the archiver
-   7 surface, V16 and V17 for wasm memory). Every P row of 3.3 is demonstrated by a
+   7 surface, V16 and V17 for wasm memory, V20 for the two module formats). Every P row of 3.3 is demonstrated by a
    differential case of the table in 14.2 showing ykk and upstream agree.
 8. This file, `BEHAVIORS.tsv` and `PORTMAP.tsv` are consistent with the code (M8).
 9. The work is merged to the default branch through a pull request linked to its tracking

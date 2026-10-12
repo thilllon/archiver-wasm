@@ -1,4 +1,4 @@
-// src/wasm-types.ts: the TypeScript view of section 5.3. Hand-written; nothing is imported from pkg/.
+// src/wasm-types.ts: the TypeScript view of section 5.3. Hand-written; nothing is imported from dist/wasm/.
 export interface WasmZipEntryInfo {
   readonly name: string;
   readonly size: number;

@@ -1,1 +1,1 @@
-module.exports = require('../../../../../cjs/index.cjs').CryptoStream;
+module.exports = require('../../../../../dist/index.cjs').CryptoStream;

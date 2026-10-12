@@ -4,11 +4,15 @@ import type { YkkWasm } from './wasm-types.js';
 
 export type { YkkWasm, WasmZipEntryInfo } from './wasm-types.js';
 
-// __filename exists in the CommonJS bundle; tsup's import.meta.url shim there mangles '#', '?' and '%' in the path.
+// __filename exists in the CommonJS bundle; import.meta.url is the ES module one.
 const nodeRequire = createRequire(typeof __filename === 'string' ? __filename : import.meta.url);
 
-/** The instantiated wasm module. Loaded synchronously when this module is evaluated. */
-export const wasm = nodeRequire('../pkg/ykk_wasm.cjs') as YkkWasm;
+/**
+ * The instantiated wasm module. Loaded synchronously when this module is evaluated.
+ * The path is relative to the bundle (dist/index.mjs, dist/index.cjs): scripts/build-wasm.sh
+ * writes the glue to dist/wasm. Both bundles load the same file, so there is one wasm instance.
+ */
+export const wasm = nodeRequire('./wasm/ykk_wasm.cjs') as YkkWasm;
 
 export const EMPTY: Buffer = Buffer.alloc(0);
 

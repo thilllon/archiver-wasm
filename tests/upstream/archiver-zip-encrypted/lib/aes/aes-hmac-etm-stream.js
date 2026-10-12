@@ -6,4 +6,4 @@ aes.Counter.prototype.increment = function () {
     if (this._counter[i] === 255) { this._counter[i] = 0; } else { this._counter[i]++; break; }
   }
 };
-module.exports = require('../../../../../cjs/index.cjs').AesHmacEtmStream;
+module.exports = require('../../../../../dist/index.cjs').AesHmacEtmStream;
