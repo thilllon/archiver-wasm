@@ -9,7 +9,8 @@ import { fileURLToPath } from 'node:url';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const check = process.argv.includes('--check');
 const version = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version;
-if (!/^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/.test(version)) {
+// No prerelease versions: release.yml publishes to the latest dist-tag only.
+if (!/^\d+\.\d+\.\d+$/.test(version)) {
   console.error('sync-version: unexpected version ' + JSON.stringify(version));
   process.exit(1);
 }

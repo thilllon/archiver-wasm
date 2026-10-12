@@ -23,31 +23,26 @@ env:
   WASM_PACK_VERSION: 0.15.0 # PORTING.md 12.3, fixed by the toolchain gate (2.2)
 
 jobs:
-  # Decides what this run does. With pending Changesets it writes the next version and opens
-  # or refreshes the version pull request (changed=true). Without them it asks the registry
-  # whether the version of package.json is already served (publish=true when it is not).
+  # Decides what this run does, with a read-only token. With pending Changesets it writes the
+  # next version and hands the result to propose as a patch (changed=true). Without them it
+  # asks the registry whether the version of package.json is already served (publish=true
+  # when it is not).
   prepare:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    permissions:
-      contents: write
-      pull-requests: write
     outputs:
       changed: ${{ steps.prepare.outputs.changed }}
+      next: ${{ steps.prepare.outputs.next }}
       publish: ${{ steps.registry.outputs.publish }}
       version: ${{ steps.registry.outputs.version }}
       base: ${{ steps.base.outputs.sha }}
-      sha: ${{ steps.pr.outputs.sha }}
-      tree: ${{ steps.pr.outputs.tree }}
-      pr: ${{ steps.pr.outputs.pr }}
-    env:
-      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
-          fetch-depth: 0
+          fetch-depth: 0 # Changesets names the commit of each Changeset in the changelog
+          persist-credentials: false
 
       - id: base
         env:
@@ -76,8 +71,18 @@ jobs:
           if git diff --cached --quiet; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
           else
+            git diff --cached --binary > "$RUNNER_TEMP/version.patch"
             echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "next=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
           fi
+
+      - uses: actions/upload-artifact@v4
+        if: steps.prepare.outputs.changed == 'true'
+        with:
+          name: version-patch
+          path: ${{ runner.temp }}/version.patch
+          if-no-files-found: error
+          retention-days: 7
 
       - name: Ask the registry whether this version is already published
         id: registry
@@ -95,34 +100,65 @@ jobs:
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
+  # The only job that pushes a branch. It runs no repository code and installs nothing: it
+  # applies the patch that prepare wrote, so no script or dependency ever sees a write token.
+  propose:
+    needs: prepare
+    if: needs.prepare.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+    outputs:
+      sha: ${{ steps.pr.outputs.sha }}
+      tree: ${{ steps.pr.outputs.tree }}
+      pr: ${{ steps.pr.outputs.pr }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VERSION: ${{ needs.prepare.outputs.next }}
+      BASE_SHA: ${{ needs.prepare.outputs.base }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.base }}
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: version-patch
+          path: ${{ runner.temp }}/version-patch
+
       - name: Create or refresh the version pull request
         id: pr
-        if: steps.prepare.outputs.changed == 'true'
         run: |
-          version=$(node -p "require('./package.json').version")
+          test "$(git rev-parse HEAD)" = "$BASE_SHA"
+          # A re-run of an old run must not open a version pull request against a newer main.
+          test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)" = "$BASE_SHA" || { echo 'main has moved since this run started; the release run of the newer push takes over.'; exit 1; }
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git switch --force-create automation/releases
-          git commit --message "chore(release): $version"
+          git apply --index "$RUNNER_TEMP/version-patch/version.patch"
+          git commit --message "chore(release): $VERSION"
           git push --force origin automation/releases
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           echo "tree=$(git rev-parse 'HEAD^{tree}')" >> "$GITHUB_OUTPUT"
-          pr=$(gh pr list --head automation/releases --base main --state open --json number --jq '.[0].number // empty')
+          pr=$(gh pr list --head automation/releases --base main --state open --json number,isCrossRepository --jq '[.[] | select(.isCrossRepository | not)][0].number // empty')
           if [ -z "$pr" ]; then
-            gh pr create --head automation/releases --base main --title "chore(release): $version" \
+            gh pr create --head automation/releases --base main --title "chore(release): $VERSION" \
               --body 'Version and changelog written by Changesets. The release workflow runs the whole CI matrix on this exact commit, merges it, and then publishes from main.'
-            pr=$(gh pr list --head automation/releases --base main --state open --json number --jq '.[0].number')
+            pr=$(gh pr list --head automation/releases --base main --state open --json number,isCrossRepository --jq '[.[] | select(.isCrossRepository | not)][0].number // empty')
           else
-            gh pr edit "$pr" --title "chore(release): $version"
+            gh pr edit "$pr" --title "chore(release): $VERSION"
           fi
           test -n "$pr"
           echo "pr=$pr" >> "$GITHUB_OUTPUT"
 
-  # A pull request opened with GITHUB_TOKEN starts no CI of its own, so the whole matrix of
-  # ci.yml is dispatched on the version commit and awaited here.
+  # A pull request opened or updated with GITHUB_TOKEN only gets a pull_request run of ci.yml
+  # that waits for approval and never runs a job. So the whole matrix of ci.yml is dispatched
+  # on the version commit and awaited here.
   validate:
-    needs: prepare
-    if: needs.prepare.outputs.changed == 'true'
+    needs: propose
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:
@@ -131,7 +167,7 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
-      VALIDATED_SHA: ${{ needs.prepare.outputs.sha }}
+      VALIDATED_SHA: ${{ needs.propose.outputs.sha }}
       RUN_KEY: release-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
       - name: Run CI on the exact version commit
@@ -155,8 +191,7 @@ jobs:
           exit 1
 
   merge:
-    needs: [prepare, validate]
-    if: needs.prepare.outputs.changed == 'true'
+    needs: [prepare, propose, validate]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -166,10 +201,10 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
-      RELEASE_PR: ${{ needs.prepare.outputs.pr }}
-      RELEASE_SHA: ${{ needs.prepare.outputs.sha }}
+      RELEASE_PR: ${{ needs.propose.outputs.pr }}
+      RELEASE_SHA: ${{ needs.propose.outputs.sha }}
       BASE_SHA: ${{ needs.prepare.outputs.base }}
-      VALIDATED_TREE: ${{ needs.prepare.outputs.tree }}
+      VALIDATED_TREE: ${{ needs.propose.outputs.tree }}
     steps:
       - name: Merge only the validated commit on its validated base
         run: |
@@ -182,9 +217,39 @@ jobs:
 
       # A merge made with GITHUB_TOKEN starts no push workflow, so the publishing run is
       # dispatched explicitly. It starts from the new main and finds no pending Changesets.
+      # Also when the tree check above failed after the merge went through: the job stays red,
+      # and the dispatched run re-examines the new main from scratch.
       - name: Start the publishing run on the new main
-        if: vars.NPM_PUBLISH_ENABLED == 'true'
-        run: gh workflow run release.yml --ref main
+        if: always() && vars.NPM_PUBLISH_ENABLED == 'true'
+        run: |
+          test "$(gh pr view "$RELEASE_PR" --json state --jq .state)" = MERGED || exit 0
+          gh workflow run release.yml --ref main
+
+  # GitHub concludes the unapproved pull_request run of the version commit without jobs when
+  # the pull request merges, which leaves a red mark on a commit that passed the dispatched CI.
+  cleanup:
+    needs: [propose, merge]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RELEASE_SHA: ${{ needs.propose.outputs.sha }}
+    steps:
+      - name: Delete the unapproved pull_request CI run of the merged version commit
+        run: |
+          runs=$(gh api "repos/$GH_REPO/actions/workflows/ci.yml/runs?event=pull_request&head_sha=$RELEASE_SHA" --jq '
+            .workflow_runs[]
+            | select(.head_branch == "automation/releases" and .actor.login == "github-actions[bot]")
+            | select(.status == "completed" and (.conclusion == "action_required" or .conclusion == "failure"))
+            | .id')
+          for run in $runs; do
+            test "$(gh api "repos/$GH_REPO/actions/runs/$run/jobs" --jq .total_count)" = 0 || continue
+            gh api --method DELETE "repos/$GH_REPO/actions/runs/$run"
+            echo "Deleted unapproved pull_request run $run."
+          done
 
   # Builds, tests and packs without the id-token permission, so no build script, test or
   # dev dependency can request the OIDC identity that npm exchanges for publish access.
@@ -284,8 +349,16 @@ jobs:
       - name: npm must support trusted publishing (11.5.1 or later)
         run: node -e "const [a,b,c]=process.argv[1].split('.').map(Number); process.exit(a>11||(a===11&&(b>5||(b===5&&c>=1)))?0:1)" "$(npm --version)"
 
+      # Skips the upload when the registry already serves this version, so "Re-run failed
+      # jobs" recovers a run whose upload landed before a later step failed.
       - name: Publish
-        run: npm publish ./tarball/*.tgz --ignore-scripts --access public
+        run: |
+          spec=$(tar -xOf ./tarball/*.tgz package/package.json | node -p "const p = JSON.parse(require('fs').readFileSync(0, 'utf8')); p.name + '@' + p.version")
+          if [ "$(npm view "$spec" version 2>/dev/null)" = "${spec##*@}" ]; then
+            echo "$spec is already on npm."
+            exit 0
+          fi
+          npm publish ./tarball/*.tgz --ignore-scripts --access public
 
   # Tags the published commit. The tag is pushed with GITHUB_TOKEN and starts no workflow.
   tag:
@@ -302,8 +375,8 @@ jobs:
     steps:
       - name: Create v<version> on the published commit
         run: |
-          existing=$(gh api "repos/$GH_REPO/git/ref/tags/v$VERSION" --jq .object.sha 2>/dev/null || true)
-          if [ -n "$existing" ]; then
+          # On a 404 gh prints the error body, so the exit status decides, not the output.
+          if existing=$(gh api "repos/$GH_REPO/git/ref/tags/v$VERSION" --jq .object.sha 2>/dev/null); then
             test "$existing" = "$EVENT_SHA" || { echo "v$VERSION already points at $existing"; exit 1; }
             exit 0
           fi
