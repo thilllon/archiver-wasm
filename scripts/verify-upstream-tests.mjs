@@ -50,17 +50,17 @@ const shims = {
   'alias-archiver.cjs': [
     "const Module = require('node:module');",
     "const path = require('node:path');",
-    "const target = path.resolve(__dirname, '../../cjs/index.cjs');",
+    "const target = path.resolve(__dirname, '../../dist/index.cjs');",
     'const resolveFilename = Module._resolveFilename;',
     'Module._resolveFilename = function (request, ...rest) {',
     "  return request === 'archiver' ? target : resolveFilename.call(this, request, ...rest);",
     '};',
   ],
   'node-archiver/package.json': ['{"type":"module"}'],
-  'node-archiver/index.js': ['export * from "../../../esm/index.mjs";'],
+  'node-archiver/index.js': ['export * from "../../../dist/index.mjs";'],
   'archiver-zip-encrypted/package.json': ['{"type":"commonjs"}'],
   'archiver-zip-encrypted/index.js': ["module.exports = require('./lib/zip-encrypted');"],
-  'archiver-zip-encrypted/lib/zip-encrypted.js': ["module.exports = require('../../../../cjs/index.cjs').ZipEncrypted;"],
+  'archiver-zip-encrypted/lib/zip-encrypted.js': ["module.exports = require('../../../../dist/index.cjs').ZipEncrypted;"],
   'archiver-zip-encrypted/lib/aes/aes-hmac-etm-stream.js': [
     '// The upstream test decrypts with aes-js and relies on the little-endian counter patch that',
     "// upstream's library applied globally when required (aes-hmac-etm-stream.js:16-25, N7).",
@@ -70,11 +70,11 @@ const shims = {
     '    if (this._counter[i] === 255) { this._counter[i] = 0; } else { this._counter[i]++; break; }',
     '  }',
     '};',
-    "module.exports = require('../../../../../cjs/index.cjs').AesHmacEtmStream;",
+    "module.exports = require('../../../../../dist/index.cjs').AesHmacEtmStream;",
   ],
-  'archiver-zip-encrypted/lib/zip20/zip-crypto-stream.js': ["module.exports = require('../../../../../cjs/index.cjs').ZipCryptoStream;"],
-  'archiver-zip-encrypted/lib/zip20/crypto-stream.js': ["module.exports = require('../../../../../cjs/index.cjs').CryptoStream;"],
-  'archiver-zip-encrypted/lib/zip20/decrypto-stream.js': ["module.exports = require('../../../../../cjs/index.cjs').DecryptoStream;"],
+  'archiver-zip-encrypted/lib/zip20/zip-crypto-stream.js': ["module.exports = require('../../../../../dist/index.cjs').ZipCryptoStream;"],
+  'archiver-zip-encrypted/lib/zip20/crypto-stream.js': ["module.exports = require('../../../../../dist/index.cjs').CryptoStream;"],
+  'archiver-zip-encrypted/lib/zip20/decrypto-stream.js': ["module.exports = require('../../../../../dist/index.cjs').DecryptoStream;"],
 };
 // PORTING.md 14.5 (it() cases per spec file, in mocha's order; TESTS-001)
 const counts = {

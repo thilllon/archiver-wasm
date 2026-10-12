@@ -1,1 +1,1 @@
-module.exports = require('../../../../../cjs/index.cjs').ZipCryptoStream;
+module.exports = require('../../../../../dist/index.cjs').ZipCryptoStream;

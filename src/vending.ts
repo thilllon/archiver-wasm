@@ -18,7 +18,12 @@ interface Vending {
   isRegisteredFormat(format: string): boolean;
 }
 
-var formats: Record<string, ModuleConstructor> = {};
+// One registry for the ES module bundle and the CommonJS bundle of this package: a format
+// registered through `require` is visible to `import` and the reverse (PORTING.md 15.4).
+var REGISTRY = Symbol.for('@thilllon/ykk.formats');
+var shared = globalThis as { [REGISTRY]?: Record<string, ModuleConstructor> };
+var registered = shared[REGISTRY] !== undefined;
+var formats: Record<string, ModuleConstructor> = shared[REGISTRY] ??= {};
 
 /**
  * Dispenses a new Archiver instance.
@@ -92,9 +97,11 @@ vending.isRegisteredFormat = function (format: string) {
   return false;
 };
 
-vending.registerFormat('zip', Zip);
-vending.registerFormat('tar', Tar);
-vending.registerFormat('json', Json);
+if (!registered) {
+  vending.registerFormat('zip', Zip);
+  vending.registerFormat('tar', Tar);
+  vending.registerFormat('json', Json);
+}
 
 // archiver-zip-encrypted/node_modules/archiver/index.js:84 (module.exports = vending, PORTING.md 7.2)
 export var create = vending.create;
