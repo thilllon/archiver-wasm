@@ -1,6 +1,6 @@
 // Golden byte tests and the shared sanitizer vectors (PORTING.md 14.3). The expected bytes
-// and tables under golden/ are written by scripts/capture-golden.mjs from the upstream
-// packages; nothing here is obtained by running the port.
+// and tables under golden/ were captured from the upstream packages; nothing here is
+// obtained by running the port.
 
 use std::io::Read;
 

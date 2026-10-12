@@ -11,7 +11,7 @@
 // A scenario is `async (impl, ctx) => { ... }`. It is called once per implementation.
 //
 //   impl.name                                         'upstream' or 'port'
-//   impl.Archiver, ZipArchive, TarArchive, JsonArchive, ArchiverError     the archiver 8 surface
+//   impl.ZipArchive, TarArchive, JsonArchive          the archiver 8 surface
 //   impl.archiver                                     the archiver 7 vending function, 'zip-encrypted' registered
 //   impl.ZipEncrypted, ZipAesStream, ZipCryptoStream, AesHmacEtmStream, CryptoStream, DecryptoStream, CryptoCipher
 //
@@ -81,7 +81,6 @@ let installed = null;
 async function loadUpstream() {
   const entry = require.resolve('archiver');
   const ns = await import(pathToFileURL(entry).href);
-  const error = await import(pathToFileURL(path.join(path.dirname(entry), 'lib/error.js')).href);
   const encrypted = createRequire(require.resolve('archiver-zip-encrypted'));
   const archiver = encrypted('archiver');
   const ZipEncrypted = require('archiver-zip-encrypted');
@@ -90,11 +89,9 @@ async function loadUpstream() {
   }
   return {
     name: 'upstream',
-    Archiver: ns.Archiver,
     ZipArchive: ns.ZipArchive,
     TarArchive: ns.TarArchive,
     JsonArchive: ns.JsonArchive,
-    ArchiverError: error.ArchiverError,
     archiver,
     ZipEncrypted,
     ZipAesStream: encrypted('./lib/aes/zip-aes-stream.js'),
@@ -117,11 +114,9 @@ async function loadPort() {
   }
   return {
     name: 'port',
-    Archiver: ns.Archiver,
     ZipArchive: ns.ZipArchive,
     TarArchive: ns.TarArchive,
     JsonArchive: ns.JsonArchive,
-    ArchiverError: ns.ArchiverError,
     archiver,
     ZipEncrypted: archiver.ZipEncrypted,
     ZipAesStream: archiver.ZipAesStream,

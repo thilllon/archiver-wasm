@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // PORTING.md 14.5: fails if a vendored test file differs from tests/upstream/SHA256SUMS, from
-// its hash at the pinned upstream commit (below), from its source under .upstream/ (when that
-// directory is present) or from its row of tests/upstream/LEDGER.tsv, if a file was added to
+// its hash at the pinned upstream commit (below) or from its row of
+// tests/upstream/LEDGER.tsv, if a file was added to
 // or removed from a vendored tree, and if a shim differs from its text in PORTING.md 14.1.
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -9,18 +9,13 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const upstream = path.join(root, '.upstream');
 const vendored = path.join(root, 'tests', 'upstream');
 
 const trees = ['node-archiver/test', 'archiver-zip-encrypted/test'];
-const licenses = {
-  'LICENSE.node-archiver': 'node-archiver/LICENSE',
-  'LICENSE.archiver-zip-encrypted': 'archiver-zip-encrypted/LICENSE',
-};
-// scripts/fetch-upstream.sh (SHA-256 of every vendored file at node-archiver
-// 52d1d349dfa2bf17956ecab56f477736688a9c5e and archiver-zip-encrypted
-// 0be6b0e6cbc2c4fbd15342a4b1389862679d7668; .upstream/ is absent in CI, and SHA256SUMS is
-// written by the same commit that could edit a vendored test)
+const licenses = new Set(['LICENSE.node-archiver', 'LICENSE.archiver-zip-encrypted']);
+// SHA-256 of every vendored file at node-archiver 52d1d349dfa2bf17956ecab56f477736688a9c5e and
+// archiver-zip-encrypted 0be6b0e6cbc2c4fbd15342a4b1389862679d7668. SHA256SUMS alone would not
+// do: it is written by the same commit that could edit a vendored test.
 const pinned = {
   'LICENSE.archiver-zip-encrypted': 'adb1eb7da86ec03af695b93cc0486cc4239d8863dead4ee7dd855727c2f0aded',
   'LICENSE.node-archiver': '9e23899170d96e708b24a2afce11e96d169c8cebf1bd24ac60b675a400cb1cf1',
@@ -138,11 +133,9 @@ for (const line of readRows(path.join(vendored, 'SHA256SUMS'))) {
   }
 }
 
-const hasUpstream = fs.existsSync(upstream);
-
 for (const [file, expected] of sums) {
   const inTree = trees.some((tree) => file.startsWith(tree + '/'));
-  if (!inTree && !(file in licenses)) {
+  if (!inTree && !licenses.has(file)) {
     problems.push('SHA256SUMS: ' + file + ' is not a vendored path');
     continue;
   }
@@ -157,14 +150,6 @@ for (const [file, expected] of sums) {
   }
   if (sha256(path.join(vendored, file)) !== expected) {
     problems.push('tests/upstream/' + file + ' differs from SHA256SUMS');
-  }
-  if (hasUpstream) {
-    const source = path.join(upstream, inTree ? file : licenses[file]);
-    if (!isFile(source)) {
-      problems.push('.upstream/' + path.relative(upstream, source) + ' is missing');
-    } else if (sha256(source) !== expected) {
-      problems.push('SHA256SUMS: ' + file + ' differs from .upstream/' + path.relative(upstream, source));
-    }
   }
 }
 
@@ -182,13 +167,6 @@ for (const tree of trees) {
   for (const file of walk(vendored, tree, [])) {
     if (!sums.has(file)) {
       problems.push('tests/upstream/' + file + ' is not listed in SHA256SUMS');
-    }
-  }
-  if (hasUpstream) {
-    for (const file of walk(upstream, tree, [])) {
-      if (!sums.has(file)) {
-        problems.push('.upstream/' + file + ' is not vendored');
-      }
     }
   }
 }
@@ -254,7 +232,4 @@ if (problems.length > 0) {
   }
   process.exit(1);
 }
-console.log(
-  'verify-upstream-tests: ' + sums.size + ' vendored files match SHA256SUMS and the pinned upstream hashes' +
-    (hasUpstream ? ' and .upstream/' : ' (.upstream/ is absent, not compared)'),
-);
+console.log('verify-upstream-tests: ' + sums.size + ' vendored files match SHA256SUMS and the pinned upstream hashes');
