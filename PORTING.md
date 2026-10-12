@@ -636,7 +636,7 @@ crates/archiver-wasm/src/lib.rs                   wasm-bindgen classes (pinned s
 
 package.json  package-lock.json  tsconfig.json  tsdown.config.ts  .gitattributes   (pinned, 15; there is deliberately no .mocharc file, 14.1)
 .github/workflows/ci.yml                     Linux and macOS, Node 18/20/22/24: build under Node 24, the whole test matrix under each (15.5)
-.github/workflows/release.yml                publish to npm from a version tag through the trusted publisher (15.5)
+.github/workflows/release.yml                version, publish and tag from main through the trusted publisher (15.5)
 src/index.ts                                 node-archiver/index.js + package entry (the ESM bundle is built from it)
 src/commonjs.ts                              CommonJS entry: the vending function merged with a namespace of every export (pinned, 15.4)
 src/core.ts                                  node-archiver/lib/core.js (+ archiver 7 setFormat/setModule/_moduleSupports)
@@ -683,6 +683,7 @@ scripts/fetch-upstream.sh                    exists; restores .upstream/ includi
 scripts/build-wasm.sh                        (pinned, 15.2)
 scripts/check-wasm-types.mjs                 fails the build if the generated dist/wasm/archiver_wasm.d.cts does not satisfy src/wasm-types.ts (15.3)
 scripts/check-tarball.mjs                    packs the built dist/, checks the file list, installs the tarball into an empty project, runs the smoke checks (15.5)
+scripts/sync-version.mjs                     copies the version of package.json into the crates, Cargo.lock and this guide; --check fails on a stale copy (15.5)
 scripts/vendor-upstream-tests.mjs            copies the upstream test trees into tests/upstream/ and writes SHA256SUMS
 scripts/verify-upstream-tests.mjs            fails if a vendored test file differs from SHA256SUMS
 scripts/verify-oracle-versions.mjs           fails unless the installed upstream packages have the versions of the oracle table (14.2)
@@ -5060,6 +5061,7 @@ is the version that is published. The exact versions of `typescript`, `tsx` and
   "dependencies": { "minimatch": "^10.2.2", "streamx": "^2.28.1" },
   "devDependencies": {
     "@arethetypeswrong/core": "0.18.5",
+    "@changesets/cli": "3.0.3",
     "@types/mocha": "10.0.10",
     "@types/node": "18.19.130",
     "aes-js": "3.1.2",
@@ -5194,23 +5196,50 @@ at the pinned version from its release archive, verified against a recorded SHA-
 `npm run build`, `npm run typecheck`, set up the Node of the matrix, `npm test`,
 `node scripts/check-tarball.mjs`.
 
-`.github/workflows/release.yml` (scaffold unit): on a pushed tag `v<version>`, three jobs.
-`build` fails unless the tag equals the `version` of `package.json`; same setup as CI on
-`ubuntu-latest` with Node 24; `npm ci`; `npm run prepublishOnly`; `npm pack --ignore-scripts`;
-uploads the archive as an artifact. It has no `id-token` permission, so build and test code
-cannot request the OIDC identity. `publish` is the only job with `id-token: write`; it checks
-out nothing, downloads the archive, requires npm 11.5.1 or later (Node 24) and runs
-`npm publish <archive> --ignore-scripts --access public`. npm exchanges the OIDC identity of
-the workflow for publish access (trusted publisher) and attaches provenance. No npm token
-is stored in the repository. `verify`: it checks out the repository and sets up Node, and runs no `npm ci`, because the script
-it runs imports only Node built-ins. `npm view archiver-wasm@<version> version` must print
-the version, and a fresh `npm install archiver-wasm@<version>` in an empty project must
-pass the smoke checks of section 16 item 4
-(`node scripts/check-tarball.mjs --spec archiver-wasm@<version>`).
+`.github/workflows/release.yml` (scaffold unit): on every push to `main`, and on a manual
+dispatch. Changesets (`@changesets/cli`, `.changeset/`) is the one versioning engine: a pull
+request that changes what the package does carries a Changeset file naming the bump
+(`npx changeset`), and nobody edits a version by hand. `package.json` holds the version;
+`scripts/sync-version.mjs` copies it into the two crates, `Cargo.lock` and the snippets of
+this guide, and CI fails on a copy that disagrees (`--check`).
+
+The jobs, in order:
+
+- `prepare` checks out the event commit. With pending Changesets it runs `changeset version`
+  (which consumes them and writes `CHANGELOG.md`), `scripts/sync-version.mjs` and
+  `npm install --package-lock-only`, commits the result to `automation/releases` and opens or
+  refreshes the version pull request. Without them it asks the registry whether the version
+  of `package.json` is already served.
+- `validate` (version pull request only). A pull request opened with `GITHUB_TOKEN` starts
+  no workflow, so the whole matrix of `ci.yml` is dispatched on the version commit, with the
+  expected commit and a unique run key, and awaited.
+- `merge` (version pull request only) squashes the pull request only if its head is the
+  validated commit and `main` has not moved, checks that the merged tree is the validated
+  tree, and dispatches a new run of this workflow on `main`, because a merge made with
+  `GITHUB_TOKEN` starts none. A run that merges a version pull request never publishes.
+- `build` (no pending Changesets, version not on npm). Same setup as CI on `ubuntu-latest`
+  with Node 24; `npm ci`; `npm run prepublishOnly`; `npm pack --ignore-scripts`; uploads the
+  archive as an artifact. It has no `id-token` permission, so build and test code cannot
+  request the OIDC identity.
+- `publish` is the only job with `id-token: write`. It checks out nothing, downloads the
+  archive, requires npm 11.5.1 or later (Node 24) and runs
+  `npm publish <archive> --ignore-scripts --access public`. npm exchanges the OIDC identity of
+  the workflow for publish access (trusted publisher) and attaches provenance. No npm token
+  is stored in the repository.
+- `tag` creates `v<version>` on the published commit.
+- `verify` checks out the repository and sets up Node, and runs no `npm ci`, because the
+  script it runs imports only Node built-ins. `npm view archiver-wasm@<version> version` must
+  print the version, and a fresh `npm install archiver-wasm@<version>` in an empty project
+  must pass the smoke checks of section 16 item 4
+  (`node scripts/check-tarball.mjs --spec archiver-wasm@<version>`).
+
+`build`, `publish`, `tag` and `verify` run only while the repository Actions variable
+`NPM_PUBLISH_ENABLED` is exactly `true`. A run that finds the version already on npm does
+nothing, so a failed publication is repeated by running the workflow again from the Actions
+tab. Several pending Changesets combine into one bump, the strongest one requested.
 
 One-time owner setup. npm registers a trusted publisher only for a package that exists,
-so the first version is published with the owner's own authentication:
-`npm run prepublishOnly && npm publish --ignore-scripts --otp=<code>`. Then the owner
+so the first version (0.1.0) was published with the owner's own authentication. The owner
 registers the trusted publisher of `archiver-wasm` on npmjs.com (package Settings,
 Trusted Publisher, GitHub Actions) or with
 `npm trust github archiver-wasm --repo thilllon/archiver-wasm --file release.yml --allow-publish`:
@@ -5223,7 +5252,8 @@ Trusted Publisher, GitHub Actions) or with
 | Environment       | empty; the workflow does not name an environment         |
 
 The workflow filename is part of the registration. `release.yml` is never renamed or moved.
-Every later version is published by pushing its tag.
+The repository setting "Allow GitHub Actions to create and approve pull requests" is on,
+and squash merging is allowed.
 
 ---
 

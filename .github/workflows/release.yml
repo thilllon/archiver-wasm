@@ -1,4 +1,6 @@
-# PORTING.md 15.5. Publishes the version named by a pushed tag v<version> to npm.
+# PORTING.md 15.5. Runs on every push to main. Pending Changesets become a version pull
+# request that is validated and merged here; a main whose version npm does not serve yet
+# is built, tested, published and tagged.
 #
 # The npm trusted publisher of archiver-wasm is registered with this workflow filename.
 # Never rename or move this file: npm checks the calling workflow file of an OIDC
@@ -7,7 +9,12 @@ name: release
 
 on:
   push:
-    tags: ['v*']
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: release-main
+  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -16,16 +23,194 @@ env:
   WASM_PACK_VERSION: 0.15.0 # PORTING.md 12.3, fixed by the toolchain gate (2.2)
 
 jobs:
+  # Decides what this run does. With pending Changesets it writes the next version and opens
+  # or refreshes the version pull request (changed=true). Without them it asks the registry
+  # whether the version of package.json is already served (publish=true when it is not).
+  prepare:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+    outputs:
+      changed: ${{ steps.prepare.outputs.changed }}
+      publish: ${{ steps.registry.outputs.publish }}
+      version: ${{ steps.registry.outputs.version }}
+      base: ${{ steps.base.outputs.sha }}
+      sha: ${{ steps.pr.outputs.sha }}
+      tree: ${{ steps.pr.outputs.tree }}
+      pr: ${{ steps.pr.outputs.pr }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - id: base
+        env:
+          EVENT_SHA: ${{ github.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$EVENT_SHA"
+          echo "sha=$EVENT_SHA" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci --ignore-scripts
+
+      - name: Apply pending Changesets
+        id: prepare
+        run: |
+          if [ -n "$(find .changeset -maxdepth 1 -name '*.md' ! -name README.md -print -quit)" ]; then
+            npx changeset version
+            node scripts/sync-version.mjs
+            npm install --package-lock-only --ignore-scripts
+          fi
+          node scripts/sync-version.mjs --check
+          git add --all
+          if git diff --cached --quiet; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Ask the registry whether this version is already published
+        id: registry
+        if: steps.prepare.outputs.changed == 'false'
+        run: |
+          name=$(node -p "require('./package.json').name")
+          version=$(node -p "require('./package.json').version")
+          published=$(npm view "$name" versions --json)
+          if node -e "const v = JSON.parse(process.argv[1]); process.exit([].concat(v).includes(process.argv[2]) ? 0 : 1)" "$published" "$version"; then
+            echo "$name@$version is already on npm; nothing to publish."
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "$name@$version is not on npm yet."
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Create or refresh the version pull request
+        id: pr
+        if: steps.prepare.outputs.changed == 'true'
+        run: |
+          version=$(node -p "require('./package.json').version")
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git switch --force-create automation/releases
+          git commit --message "chore(release): $version"
+          git push --force origin automation/releases
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "tree=$(git rev-parse 'HEAD^{tree}')" >> "$GITHUB_OUTPUT"
+          pr=$(gh pr list --head automation/releases --base main --state open --json number --jq '.[0].number // empty')
+          if [ -z "$pr" ]; then
+            gh pr create --head automation/releases --base main --title "chore(release): $version" \
+              --body 'Version and changelog written by Changesets. The release workflow runs the whole CI matrix on this exact commit, merges it, and then publishes from main.'
+            pr=$(gh pr list --head automation/releases --base main --state open --json number --jq '.[0].number')
+          else
+            gh pr edit "$pr" --title "chore(release): $version"
+          fi
+          test -n "$pr"
+          echo "pr=$pr" >> "$GITHUB_OUTPUT"
+
+  # A pull request opened with GITHUB_TOKEN starts no CI of its own, so the whole matrix of
+  # ci.yml is dispatched on the version commit and awaited here.
+  validate:
+    needs: prepare
+    if: needs.prepare.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      actions: write
+      contents: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      VALIDATED_SHA: ${{ needs.prepare.outputs.sha }}
+      RUN_KEY: release-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - name: Run CI on the exact version commit
+        run: |
+          workflow_id=$(gh api "repos/$GH_REPO/actions/workflows/ci.yml" --jq .id)
+          gh workflow run ci.yml --ref automation/releases --raw-field expected_sha="$VALIDATED_SHA" --raw-field run_key="$RUN_KEY"
+          for _ in $(seq 1 60); do
+            run=$(gh run list --workflow ci.yml --event workflow_dispatch --branch automation/releases --commit "$VALIDATED_SHA" --limit 100 --json databaseId,displayTitle --jq ".[] | select(.displayTitle == \"$RUN_KEY\") | .databaseId" | head -n 1)
+            if [ -n "$run" ]; then
+              gh run watch "$run" --exit-status --interval 20
+              gh api "repos/$GH_REPO/actions/runs/$run" | jq --exit-status --arg repo "$GH_REPO" --argjson workflow "$workflow_id" --arg sha "$VALIDATED_SHA" --arg key "$RUN_KEY" '
+                .repository.full_name == $repo and .workflow_id == $workflow and
+                .head_sha == $sha and .display_title == $key and
+                .event == "workflow_dispatch" and .status == "completed" and .conclusion == "success"
+              '
+              exit 0
+            fi
+            sleep 5
+          done
+          echo 'The dispatched CI run was not found for the expected commit.' >&2
+          exit 1
+
+  merge:
+    needs: [prepare, validate]
+    if: needs.prepare.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      actions: write
+      contents: write
+      pull-requests: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RELEASE_PR: ${{ needs.prepare.outputs.pr }}
+      RELEASE_SHA: ${{ needs.prepare.outputs.sha }}
+      BASE_SHA: ${{ needs.prepare.outputs.base }}
+      VALIDATED_TREE: ${{ needs.prepare.outputs.tree }}
+    steps:
+      - name: Merge only the validated commit on its validated base
+        run: |
+          current=$(gh api "repos/$GH_REPO/git/ref/heads/main" --jq '.object.sha')
+          test "$current" = "$BASE_SHA" || { echo 'main changed during validation; the release run of that push refreshes the pull request.'; exit 1; }
+          gh pr merge "$RELEASE_PR" --squash --match-head-commit "$RELEASE_SHA" --delete-branch
+          merged=$(gh pr view "$RELEASE_PR" --json mergeCommit --jq .mergeCommit.oid)
+          test -n "$merged" && test "$merged" != null
+          test "$(gh api "repos/$GH_REPO/git/commits/$merged" --jq .tree.sha)" = "$VALIDATED_TREE"
+
+      # A merge made with GITHUB_TOKEN starts no push workflow, so the publishing run is
+      # dispatched explicitly. It starts from the new main and finds no pending Changesets.
+      - name: Start the publishing run on the new main
+        if: vars.NPM_PUBLISH_ENABLED == 'true'
+        run: gh workflow run release.yml --ref main
+
   # Builds, tests and packs without the id-token permission, so no build script, test or
   # dev dependency can request the OIDC identity that npm exchanges for publish access.
   build:
+    needs: prepare
+    if: >-
+      vars.NPM_PUBLISH_ENABLED == 'true' &&
+      needs.prepare.outputs.changed == 'false' && needs.prepare.outputs.publish == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
 
-      - name: The tag must equal the version of package.json
-        run: test "$GITHUB_REF_NAME" = "v$(node -p "require('./package.json').version")"
+      - name: The checkout must be the commit and the version that prepare examined
+        env:
+          EVENT_SHA: ${{ github.sha }}
+          PREPARED_SHA: ${{ needs.prepare.outputs.base }}
+        run: |
+          test "$PREPARED_SHA" = "$EVENT_SHA"
+          test "$(git rev-parse HEAD)" = "$EVENT_SHA"
+          test "$(node -p "require('./package.json').version")" = "$VERSION"
+          node scripts/sync-version.mjs --check
 
       - name: Install 7z (apt)
         run: sudo apt-get update && sudo apt-get install -y p7zip-full
@@ -102,12 +287,36 @@ jobs:
       - name: Publish
         run: npm publish ./tarball/*.tgz --ignore-scripts --access public
 
+  # Tags the published commit. The tag is pushed with GITHUB_TOKEN and starts no workflow.
+  tag:
+    needs: [prepare, publish]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      VERSION: ${{ needs.prepare.outputs.version }}
+      EVENT_SHA: ${{ github.sha }}
+    steps:
+      - name: Create v<version> on the published commit
+        run: |
+          existing=$(gh api "repos/$GH_REPO/git/ref/tags/v$VERSION" --jq .object.sha 2>/dev/null || true)
+          if [ -n "$existing" ]; then
+            test "$existing" = "$EVENT_SHA" || { echo "v$VERSION already points at $existing"; exit 1; }
+            exit 0
+          fi
+          gh api --method POST "repos/$GH_REPO/git/refs" --raw-field ref="refs/tags/v$VERSION" --raw-field sha="$EVENT_SHA" --jq .ref
+
   verify:
     needs: publish
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
 
       - uses: actions/setup-node@v4
         with:
@@ -117,7 +326,7 @@ jobs:
         run: |
           version=$(node -p "require('./package.json').version")
           name=$(node -p "require('./package.json').name")
-          for attempt in 1 2 3 4 5 6 7 8 9 10; do
+          for _ in 1 2 3 4 5 6 7 8 9 10; do
             if [ "$(npm view "$name@$version" version 2>/dev/null)" = "$version" ]; then exit 0; fi
             sleep 15
           done
