@@ -127,15 +127,21 @@ jobs:
             echo 'main has moved since this run started; the release run of the newer push takes over.'
             exit 1
           fi
-          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "not a release version: $VERSION" >&2
+            exit 1
+          fi
           git switch --force-create automation/releases
 
           # The consumed Changesets: tracked files of .changeset with plain names, removed.
           test -s "$from/consumed.txt"
           while IFS= read -r file; do
-            # One test per line: errexit ignores a failure on the left of && or ||.
-            [[ "$file" =~ ^\.changeset/[A-Za-z0-9_-]+\.md$ ]]
-            [ "$file" != .changeset/README.md ]
+            # Explicit exits: errexit ignores a failure on the left of && or ||, and old
+            # shells ignore a failing [[ ]] altogether.
+            if ! [[ "$file" =~ ^\.changeset/[A-Za-z0-9_-]+\.md$ ]] || [ "$file" = .changeset/README.md ]; then
+              echo "not a Changeset file name: $file" >&2
+              exit 1
+            fi
             git rm --quiet -- "$file"
           done < "$from/consumed.txt"
 
