@@ -13,11 +13,12 @@ Companion files, both normative:
 - `PORTMAP.tsv`: one row per upstream file (split files have one row per layer), grouped into
   units. A unit is the amount of work one implementer ports in one sitting.
 
-Upstream evidence is cited as `path:line` relative to `.upstream/` (gitignored; recreate with
-`scripts/fetch-upstream.sh`, which clones the two repositories at their pinned commits,
-restores their `node_modules` from their own lockfiles with `npm ci --ignore-scripts`, and
-unpacks the eight pinned dependency tarballs into `.upstream/deps/`; several ported files
-are cited from those `node_modules` trees). Precedence when sources disagree: the upstream source code,
+Upstream evidence is cited as `path:line` relative to `.upstream/`, the checkout the port
+was made from. It is not part of the repository: the two upstream repositories at their
+pinned commits with their `node_modules` restored by `npm ci --ignore-scripts`, and the
+eight pinned dependency tarballs unpacked into `.upstream/deps/` (several ported files are
+cited from those `node_modules` trees). The scripts that fetched it, vendored the tests and
+captured the golden files were removed when the port was finished; git history has them. Precedence when sources disagree: the upstream source code,
 then this file, then `BEHAVIORS.tsv`, then `PORTMAP.tsv`. If this file is wrong about
 upstream, fix this file first (section 2, rule M8), then the code.
 
@@ -679,16 +680,13 @@ src/encrypted/zip20/zip-crypto-stream.ts     TS part of .../lib/zip20/zip-crypto
 dist/                                        tsdown output: index.mjs, index.d.mts, index.cjs, index.d.cts and the two source maps (15.4) (build output, gitignored)
 dist/wasm/                                   wasm-pack output: archiver_wasm.cjs, archiver_wasm_bg.wasm, archiver_wasm.d.cts (15.2) (build output, gitignored with dist)
 
-scripts/fetch-upstream.sh                    exists; restores .upstream/ including both node_modules trees (header of this file)
 scripts/build-wasm.sh                        (pinned, 15.2)
 scripts/check-wasm-types.mjs                 fails the build if the generated dist/wasm/archiver_wasm.d.cts does not satisfy src/wasm-types.ts (15.3)
 scripts/check-tarball.mjs                    packs the built dist/, checks the file list, installs the tarball into an empty project, runs the smoke checks (15.5)
 scripts/sync-version.mjs                     copies the version of package.json into the crates, Cargo.lock and this guide; --check fails on a stale copy (15.5)
-scripts/vendor-upstream-tests.mjs            copies the upstream test trees into tests/upstream/ and writes SHA256SUMS
 scripts/verify-upstream-tests.mjs            fails if a vendored test file differs from SHA256SUMS
 scripts/verify-oracle-versions.mjs           fails unless the installed upstream packages have the versions of the oracle table (14.2)
 scripts/check-test-ledger.mjs                compares both mocha suites with tests/upstream/LEDGER.tsv and `cargo test -- --list` with crates/archiver-core/tests/LEDGER.tsv (14.5)
-scripts/capture-golden.mjs                   runs the real upstream engines with fixed inputs, writes crates/archiver-core/tests/golden/ and tests/vectors/ (14.3)
 tests/upstream/node-archiver/package.json    {"type":"module"}
 tests/upstream/node-archiver/index.js        one-line shim: export * from "../../../dist/index.mjs" (the published ESM bundle)
 tests/upstream/node-archiver/test/**         verbatim copy of .upstream/node-archiver/test (archiver.js, plugins.js, helpers/, fixtures/)
@@ -742,12 +740,12 @@ another unit (the phases after the loop follow 2.1).
 | ts-zip-engine | ts | `src/compress-commons/*.ts` |
 | ts-tar | ts | `src/plugins/tar.ts`, `src/tar-stream/*.ts`, `src/gzip.ts` |
 | ts-encrypted | ts | `src/encrypted/**` |
-| tests-upstream | tests | `tests/upstream/**` (including the two upstream license files), `scripts/{vendor-upstream-tests,verify-upstream-tests,check-test-ledger}.mjs` |
+| tests-upstream | tests | `tests/upstream/**` (including the two upstream license files), `scripts/{verify-upstream-tests,check-test-ledger}.mjs` |
 | tests-diff-helpers | tests | `tests/differential/helpers/*.mjs`, `scripts/verify-oracle-versions.mjs` |
 | tests-diff-zip | tests | `tests/differential/{zip-plain,aes,zip20,large,crypto-streams}.test.mjs`, `tests/differential/zip-large.slow.mjs` |
 | tests-diff-tar-json | tests | `tests/differential/{tar,targz,json}.test.mjs` |
 | tests-diff-behavior | tests | `tests/differential/{errors-events,preserved-defects,extraction,glob-options,behaviors,destroy-abort,preserved-defects-2}.test.mjs` |
-| tests-golden | tests | `scripts/capture-golden.mjs`, `crates/archiver-core/tests/**`, `tests/vectors/**`, `src/normalize-path.test.ts`, `src/utils.test.ts`, `src/zip-stream/utils.test.ts` |
+| tests-golden | tests | `crates/archiver-core/tests/**`, `tests/vectors/**`, `src/normalize-path.test.ts`, `src/utils.test.ts`, `src/zip-stream/utils.test.ts` |
 
 The `#[cfg(test)]` module inside a Rust source file belongs to the unit that owns the file
 (section 2, unit loop step 1); only the integration tests under `crates/archiver-core/tests/`
@@ -4183,7 +4181,7 @@ Five layers. A later layer never replaces an earlier one.
 archiver-zip-encrypted `test/aes-hmac-etm-stream.js` (1), `as-stream.js` (1),
 `crypto-stream.js` (1), `zip-aes.js` (3), `zip-encrypted.js` (4), `zip20.js` (2).
 
-They are vendored byte for byte by `scripts/vendor-upstream-tests.mjs` into `tests/upstream/`
+They were vendored byte for byte into `tests/upstream/`
 (with both upstream MIT license files) and never edited, not even the import lines. The
 imports are satisfied by shim files placed where the tests expect the library:
 
@@ -4262,7 +4260,7 @@ by its name, never by `--grep`).
 **The oracle is the pinned source.** A byte difference must come from the port, never from
 a different upstream version, so the installed oracle tree is fixed by `overrides` and
 `package-lock.json` (12.2, 15.4) and checked by `scripts/verify-oracle-versions.mjs`, which
-runs before the differential tests and before `scripts/capture-golden.mjs`. The script
+runs before the differential tests. The script
 locates each package by walking `node_modules` directories upward from the directory of
 the package that depends on it (Node's resolution order), reads its `package.json` from
 disk (several of these packages do not export it) and fails unless every version equals
@@ -4501,7 +4499,9 @@ only; a `#[cfg(test)]` module carries its own rows and does not include them.
 | `tar/pack.rs` | `overflow_and_end` | `overflow` of 0, 512 and 513; `finalize` appends 1024 zero bytes exactly once |
 
 **Golden byte tests** (`crates/archiver-core/tests/golden.rs`, unit tests-golden). The Rust tests
-read no JSON and need no parser (12.1): `scripts/capture-golden.mjs` writes Rust.
+read no JSON and need no parser (12.1): the capture script wrote Rust. That script ran
+once and was removed when the port was finished; what follows records how the checked-in
+files were produced.
 
 - The capture script first runs `scripts/verify-oracle-versions.mjs` (14.2), then drives
   the upstream **engines directly**, not archiver core: `new ZipStream(options)` of
@@ -4604,7 +4604,7 @@ pub const TAR_SCENARIOS: &[TarScenario] = &[/* ... */];
 - Golden files are committed; the capture script is re-run only when the upstream pin
   changes, and `UPSTREAM_VERSIONS` records what it ran against.
 
-**Shared sanitizer vectors (R6).** The same run of `scripts/capture-golden.mjs` builds one
+**Shared sanitizer vectors (R6).** The same run of the capture script built one
 in-memory table from the upstream functions, rows `[input, normalizePath(input, false),
 sanitizePath(input)]`, and writes it twice: as `tests/vectors/sanitize-path.json` and as
 `crates/archiver-core/tests/golden/sanitize_path_vectors.rs`
@@ -4631,8 +4631,7 @@ own output is malformed there.
 
 `tests/upstream/LEDGER.tsv` has one row per spec file: suite, file, sha256 of the vendored
 file, number of `it(` cases (24, 16, 1, 1, 1, 3, 4, 2). `scripts/verify-upstream-tests.mjs`
-recomputes the hashes against `tests/upstream/SHA256SUMS` (and against `.upstream/` when it
-is present). `scripts/check-test-ledger.mjs` runs both suites with `--reporter json` and
+recomputes the hashes against `tests/upstream/SHA256SUMS` and the pinned upstream hashes. `scripts/check-test-ledger.mjs` runs both suites with `--reporter json` and
 fails unless, per file, `tests == passes == ledger count`, `pending == 0` (on non-Windows)
 and `failures == 0`, and the totals are 40 and 12. The same script checks the Rust side:
 `crates/archiver-core/tests/LEDGER.tsv` has one row per required cargo test (the names of the

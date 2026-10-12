@@ -165,7 +165,7 @@ export function parseTar(input) {
     });
     offset = block.end;
   }
-  return { buffer, entries, trailer: buffer.subarray(offset) };
+  return { entries, trailer: buffer.subarray(offset) };
 }
 
 // 10-byte header (no FEXTRA, FNAME or FCOMMENT: the member the port and zlib.createGzip write), deflate

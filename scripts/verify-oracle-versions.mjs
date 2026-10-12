@@ -1,6 +1,6 @@
 // scripts/verify-oracle-versions.mjs
 // Fails unless the installed upstream packages have the versions of the oracle table (PORTING.md 14.2).
-// Run before the differential tests and before scripts/capture-golden.mjs.
+// Run before the differential tests.
 //
 //   node scripts/verify-oracle-versions.mjs
 
