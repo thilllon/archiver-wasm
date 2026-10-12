@@ -707,7 +707,7 @@ tests/differential/errors-events.test.mjs  preserved-defects.test.mjs  extractio
 tests/differential/large.test.mjs  crypto-streams.test.mjs  glob-options.test.mjs  behaviors.test.mjs
 tests/differential/destroy-abort.test.mjs  preserved-defects-2.test.mjs
 tests/differential/zip-large.slow.mjs        entries above 4 GiB and buffers above 1 GiB; run on demand (14.2)
-tests/unit/sanitize-path.test.ts             the shared vectors against the three TypeScript sanitizer copies (14.3)
+src/**/*.test.ts                           the shared vectors against the three TypeScript sanitizer copies, one test beside each (14.3)
 tests/vectors/sanitize-path.json             shared vectors for all sanitizePath/normalizePath copies (generated, 14.3)
 ```
 
@@ -746,7 +746,7 @@ another unit (the phases after the loop follow 2.1).
 | tests-diff-zip | tests | `tests/differential/{zip-plain,aes,zip20,large,crypto-streams}.test.mjs`, `tests/differential/zip-large.slow.mjs` |
 | tests-diff-tar-json | tests | `tests/differential/{tar,targz,json}.test.mjs` |
 | tests-diff-behavior | tests | `tests/differential/{errors-events,preserved-defects,extraction,glob-options,behaviors,destroy-abort,preserved-defects-2}.test.mjs` |
-| tests-golden | tests | `scripts/capture-golden.mjs`, `crates/archiver-core/tests/**`, `tests/vectors/**`, `tests/unit/sanitize-path.test.ts` |
+| tests-golden | tests | `scripts/capture-golden.mjs`, `crates/archiver-core/tests/**`, `tests/vectors/**`, `src/normalize-path.test.ts`, `src/utils.test.ts`, `src/zip-stream/utils.test.ts` |
 
 The `#[cfg(test)]` module inside a Rust source file belongs to the unit that owns the file
 (section 2, unit loop step 1); only the integration tests under `crates/archiver-core/tests/`
@@ -4028,8 +4028,8 @@ Runtime `dependencies` (exact list):
 | `minimatch` | `^10.2.2` | fixed decision; the range readdir-glob 3.0.0 declares |
 | `streamx` | `^2.28.1` | base classes of the tar engine (R2) |
 
-`devDependencies`: `typescript@5.9.3`, `tsdown@0.23.1`, `tsx@4.23.15` (runs the one
-TypeScript test file, 14.3), `@types/node@18.19.130` (`typescript`, `tsx` and `@types/node`
+`devDependencies`: `typescript@5.9.3`, `tsdown@0.23.1`, `tsx@4.23.15` (runs the
+TypeScript test files, 14.3), `@types/mocha@10.0.10` (types them), `@types/node@18.19.130` (`typescript`, `tsx` and `@types/node`
 at the exact versions the toolchain gate recorded, 2.2; `tsdown` replaced the `tsup` of the
 gate and is pinned exactly too; `@types/node` stays on the 18 line so that `tsc` rejects an
 API the lowest supported Node does not have), `publint@0.3.24` and
@@ -4610,11 +4610,11 @@ sanitizePath(input)]`, and writes it twice: as `tests/vectors/sanitize-path.json
 (`pub const SANITIZE_PATH_VECTORS: &[(&str, &str, &str)]`). Inputs contain no lone
 surrogates, so each is a valid Rust string literal. The Rust copy is asserted by the
 `sanitize_path_vectors` test of `golden.rs` against `zip/utils.rs`. The three TypeScript
-copies are asserted by `tests/unit/sanitize-path.test.ts` (unit tests-golden), which
-imports `../../src/utils.ts`, `../../src/zip-stream/utils.ts` and
-`../../src/normalize-path.ts` and runs under `tsx`
-(`mocha --no-config -n import=tsx "tests/unit/*.test.ts"`, script `test:unit`). This is the
-only test that imports from `src/` directly; it can, because these three modules do not
+copies are each asserted by a test file beside them (unit tests-golden):
+`src/utils.test.ts`, `src/zip-stream/utils.test.ts` and `src/normalize-path.test.ts`.
+They run under `tsx`
+(`mocha --no-config -n import=tsx "src/**/*.test.ts"`, script `test:unit`). These are the
+only tests that import from `src/` directly; they can, because these three modules do not
 load the wasm. Every other test goes through the built package.
 
 ### 14.4 Extraction with independent tools
@@ -4838,7 +4838,7 @@ export function wasmString(value: unknown): string {
 `./wasm/archiver_wasm.cjs` is a path relative to the bundle: `dist/index.mjs` and
 `dist/index.cjs` both sit next to `dist/wasm/`, where `scripts/build-wasm.sh` writes the
 glue (15.2). It is not correct from `src/` unbundled, and no unbundled code path loads
-wasm: the one TypeScript unit test (`tests/unit/sanitize-path.test.ts`, 14.3) imports only
+wasm: the TypeScript unit tests (`src/**/*.test.ts`, 14.3) import only
 `src/normalize-path.ts` and the two `sanitizePath` utilities (`src/utils.ts`,
 `src/zip-stream/utils.ts`), none of which imports `src/wasm.ts`. Both bundles require the
 same file, so a process that loads both has one wasm instance (Node's module cache, V20).
@@ -5060,6 +5060,7 @@ is the version that is published. The exact versions of `typescript`, `tsx` and
   "dependencies": { "minimatch": "^10.2.2", "streamx": "^2.28.1" },
   "devDependencies": {
     "@arethetypeswrong/core": "0.18.5",
+    "@types/mocha": "10.0.10",
     "@types/node": "18.19.130",
     "aes-js": "3.1.2",
     "archiver": "8.0.0",
@@ -5091,7 +5092,7 @@ is the version that is published. The exact versions of `typescript`, `tsx` and
     "build": "npm run build:ts && npm run build:wasm && node scripts/check-wasm-types.mjs",
     "typecheck": "tsc --noEmit",
     "test:rust": "cargo test --workspace && cargo test --workspace --release",
-    "test:unit": "mocha --no-config -n import=tsx \"tests/unit/*.test.ts\"",
+    "test:unit": "mocha --no-config -n import=tsx \"src/**/*.test.ts\"",
     "test:upstream:archiver": "cd tests/upstream/node-archiver && rm -f test/fixtures/directory/subdir/level0link.txt test/fixtures/directory/subdir/subsublink && mocha --reporter dot",
     "test:upstream:encrypted": "cd tests/upstream/archiver-zip-encrypted && mocha --require ../alias-archiver.cjs",
     "test:oracle": "node scripts/verify-oracle-versions.mjs",
@@ -5141,9 +5142,9 @@ development tree, not only the two oracle packages; it has no effect on what a c
 the published package installs.
 
 `tsconfig.json`: `"target": "ES2022"`, `"module": "ESNext"`, `"moduleResolution": "Bundler"`,
-`"strict": true`, `"verbatimModuleSyntax": true`, `"types": ["node"]`, `"noEmit": true`,
-`"include": ["src"]` (the one TypeScript test file under `tests/unit` is executed by `tsx`
-and is not part of the `tsc` program). `noUncheckedIndexedAccess` stays off (a transliteration cannot satisfy
+`"strict": true`, `"verbatimModuleSyntax": true`, `"types": ["node", "mocha"]`, `"noEmit": true`,
+`"include": ["src"]` (the test files `src/**/*.test.ts` are part of the `tsc` program, which is
+why `mocha` is in `types`; they are not reachable from the tsdown entries, so they stay out of `dist/`). `noUncheckedIndexedAccess` stays off (a transliteration cannot satisfy
 it without restructuring).
 
 `.gitattributes`: `tests/upstream/**/fixtures/** -text`, `tests/upstream/**/resources/** -text`,
