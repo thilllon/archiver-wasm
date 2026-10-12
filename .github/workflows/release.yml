@@ -137,8 +137,26 @@ jobs:
           [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          # The patch comes from a job that ran dependencies. It may only touch the files a
+          # version step writes, as ordinary files: nothing executable, no link, no workflow.
+          patch="$RUNNER_TEMP/version-patch/version.patch"
+          allowed='^(\.changeset/[A-Za-z0-9._-]+\.md|CHANGELOG\.md|package\.json|package-lock\.json|Cargo\.lock|crates/archiver-(core|wasm)/Cargo\.toml|PORTING\.md)$'
+          git apply --numstat "$patch" | cut -f3- > "$RUNNER_TEMP/touched" # an unusual name comes out quoted and fails the match
+          test -s "$RUNNER_TEMP/touched"
+          if grep --invert-match --extended-regexp "$allowed" "$RUNNER_TEMP/touched"; then
+            echo 'the version patch touches a file outside the allowed set' >&2
+            exit 1
+          fi
+          if grep --extended-regexp '^(new file mode|old mode|new mode|deleted file mode) ' "$patch" | grep --invert-match --extended-regexp ' 100644$'; then
+            echo 'the version patch creates or changes a file that is not a plain 100644 file' >&2
+            exit 1
+          fi
+          if grep --quiet --extended-regexp '^(rename|copy) (from|to) ' "$patch"; then
+            echo 'the version patch renames or copies a file' >&2
+            exit 1
+          fi
           git switch --force-create automation/releases
-          git apply --index "$RUNNER_TEMP/version-patch/version.patch"
+          git apply --index "$patch"
           git commit --message "chore(release): $VERSION"
           git push --force origin automation/releases
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
